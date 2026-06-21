@@ -373,7 +373,6 @@
 
         // === ДВЕРИ ===
         const doorMat = new THREE.MeshPhongMaterial({ map: woodTex });
-        const invisibleMat = new THREE.MeshBasicMaterial({ visible: false });
         const doors = [];
         function addDoor(x, z, ry, w) {
             w = w || 1.4;
@@ -387,12 +386,7 @@
             const handle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.08), hMat);
             handle.position.set(0.5, 0, 0.07);
             mesh.add(handle);
-            const wallMesh = new THREE.Mesh(new THREE.BoxGeometry(w, dh, b), invisibleMat);
-            wallMesh.position.set(x, dh / 2, z);
-            wallMesh.rotation.y = ry || 0;
-            scene.add(wallMesh);
-            walls.push(wallMesh);
-            doors.push({ mesh, wallMesh, x, z, open: false, ry, w });
+            doors.push({ mesh, x, z, open: false, ry, w });
         }
 
         addDoor(-16, -9, 0);
@@ -1137,16 +1131,7 @@
                     const dz = player.position.z - door.z;
                     if (Math.sqrt(dx * dx + dz * dz) < 2.5) {
                         door.open = !door.open;
-                        if (door.open) {
-                            const idx = walls.indexOf(door.wallMesh);
-                            if (idx !== -1) walls.splice(idx, 1);
-                            door.mesh.rotation.y = door.ry + Math.PI / 2;
-                            door.wallMesh.visible = false;
-                        } else {
-                            walls.push(door.wallMesh);
-                            door.mesh.rotation.y = door.ry;
-                            door.wallMesh.visible = true;
-                        }
+                        door.mesh.rotation.y = door.ry + (door.open ? Math.PI / 2 : 0);
                         interacted = true;
                         break;
                     }
@@ -1175,6 +1160,19 @@
                 b.expandByScalar(r);
                 if (newX > b.min.x && newX < b.max.x && newZ > b.min.z && newZ < b.max.z) {
                     return true;
+                }
+            }
+            for (const door of doors) {
+                if (!door.open) {
+                    const cos = Math.cos(door.ry);
+                    const sin = Math.sin(door.ry);
+                    const dx = newX - door.x;
+                    const dz = newZ - door.z;
+                    const lx = dx * cos + dz * sin;
+                    const lz = -dx * sin + dz * cos;
+                    if (Math.abs(lx) < door.w / 2 + r && Math.abs(lz) < 0.2 + r) {
+                        return true;
+                    }
                 }
             }
             for (const box of boxes) {
