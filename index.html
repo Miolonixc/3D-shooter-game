@@ -452,11 +452,11 @@
             ball1.position.set(x1, y1 + 2.1, z1); scene.add(ball1);
             const ball2 = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), ballMat);
             ball2.position.set(x2, y2 + 2.1, z2); scene.add(ball2);
-            ropes.push({ x1, y1: y1 + 2, z1, x2, y2: y2 + 2, z2, name });
+            ropes.push({ x1, y1: y1 + 2.1, z1, x2, y2: y2 + 2.1, z2, name });
         }
 
-        addRope(-7, 3.55, -21, -7, 3.55, -9, 'Верёвка: крыша C → крыша A');
-        addRope(7, 3.55, -21, 7, 3.55, -9, 'Верёвка: крыша D → крыша B');
+        addRope(-17, 3.55, -21, -17, 3.55, 0, 'Верёвка: крыша C → крыша A');
+        addRope(17, 3.55, -21, 17, 3.55, 0, 'Верёвка: крыша D → крыша B');
 
         // === УЛИЧНЫЕ ЭЛЕМЕНТЫ ===
         function addLamp(x, z) {
@@ -1200,13 +1200,15 @@
                 for (const rope of ropes) {
                     const d1 = Math.sqrt((player.position.x-rope.x1)**2 + (player.position.z-rope.z1)**2);
                     const d2 = Math.sqrt((player.position.x-rope.x2)**2 + (player.position.z-rope.z2)**2);
-                    if (d1 < 2.5) {
-                        player.position.set(rope.x2, rope.y2 + 0.6, rope.z2);
+                    if (d1 < 3) {
+                        player.position.set(rope.x2, rope.y2 + 1, rope.z2);
+                        velocityY = 0;
                         interacted = true;
                         break;
                     }
-                    if (d2 < 2.5) {
-                        player.position.set(rope.x1, rope.y1 + 0.6, rope.z1);
+                    if (d2 < 3) {
+                        player.position.set(rope.x1, rope.y1 + 1, rope.z1);
+                        velocityY = 0;
                         interacted = true;
                         break;
                     }
@@ -1426,7 +1428,7 @@
                 for (const rope of ropes) {
                     const d1 = Math.sqrt((player.position.x-rope.x1)**2 + (player.position.z-rope.z1)**2);
                     const d2 = Math.sqrt((player.position.x-rope.x2)**2 + (player.position.z-rope.z2)**2);
-                    if (d1 < 2.5 || d2 < 2.5) {
+                    if (d1 < 3 || d2 < 3) {
                         showInteract = '[E] ' + rope.name;
                         break;
                     }
