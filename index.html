@@ -308,8 +308,8 @@
             boxes.push({ mesh: m, type: 'low', h, x, z });
         }
 
-        const W3 = (x, z, sx, sz, mat) => W(x, z, sx, sz, mat, 3);
-        const b = 0.4;
+        const W3 = (x, z, sx, sz, mat) => W(x, z, sx, sz, mat, 4);
+        const b = 1.0;
 
         // === ГРАНИЦЫ ===
         W3(0, -35, 70, b, brickTex2);
@@ -317,55 +317,55 @@
         W3(-35, 0, b, 70, brickTex2);
         W3(35, 0, b, 70, brickTex2);
 
-        // === ЗДАНИЕ A: x:-25..-7, z:-9..9 ===
-        W3(-20.85, -9, 8.3, b, brickTex);
-        W3(-11.15, -9, 8.3, b, brickTex);
+        // === ЗДАНИЕ A: x:-25..-7, z:-9..9 (проём 2.5) ===
+        W3(-21.125, -9, 7.75, b, brickTex);
+        W3(-10.875, -9, 7.75, b, brickTex);
         W3(-16, 9, 18, b, brickTex);
-        W(-25, 0, b, 18, brickTex);
-        W(-7, -4.85, b, 8.3, brickTex);
-        W(-7, 4.85, b, 8.3, brickTex);
+        W(-25, 0, b, 18, brickTex, 4);
+        W(-7, -5, b, 8, brickTex, 4);
+        W(-7, 5, b, 8, brickTex, 4);
 
         // === ЗДАНИЕ B: x:7..25, z:-9..9 ===
-        W3(11.15, -9, 8.3, b, brickTex2);
-        W3(20.85, -9, 8.3, b, brickTex2);
+        W3(11, -9, 8, b, brickTex2);
+        W3(21, -9, 8, b, brickTex2);
         W3(16, 9, 18, b, brickTex2);
-        W(7, -4.85, b, 8.3, brickTex2);
-        W(7, 4.85, b, 8.3, brickTex2);
-        W(25, 0, b, 18, brickTex2);
+        W(7, -5, b, 8, brickTex2, 4);
+        W(7, 5, b, 8, brickTex2, 4);
+        W(25, 0, b, 18, brickTex2, 4);
 
         // === ЗДАНИЕ C: x:-25..-7, z:-25..-17 ===
-        W3(-20.85, -17, 8.3, b, brickTex);
-        W3(-11.15, -17, 8.3, b, brickTex);
+        W3(-21.125, -17, 7.75, b, brickTex);
+        W3(-10.875, -17, 7.75, b, brickTex);
         W3(-16, -25, 18, b, brickTex);
-        W(-25, -21, b, 8, brickTex);
-        W(-7, -21, b, 8, brickTex);
+        W(-25, -21, b, 8, brickTex, 4);
+        W(-7, -21, b, 8, brickTex, 4);
 
         // === ЗДАНИЕ D: x:7..25, z:-25..-17 ===
-        W3(11.15, -17, 8.3, b, brickTex2);
-        W3(20.85, -17, 8.3, b, brickTex2);
+        W3(11, -17, 8, b, brickTex2);
+        W3(21, -17, 8, b, brickTex2);
         W3(16, -25, 18, b, brickTex2);
-        W(7, -21, b, 8, brickTex2);
-        W(25, -21, b, 8, brickTex2);
+        W(7, -21, b, 8, brickTex2, 4);
+        W(25, -21, b, 8, brickTex2, 4);
 
         // === СКЛАД: x:-8..8, z:17..27 ===
-        W(-4.65, 17, 6.7, b, brickTex);
-        W(4.65, 17, 6.7, b, brickTex);
-        W(0, 27, 16, b, brickTex);
-        W(-8, 22, b, 10, brickTex);
-        W(8, 22, b, 10, brickTex);
+        W(-4.5, 17, 7, b, brickTex, 5);
+        W(4.5, 17, 7, b, brickTex, 5);
+        W(0, 27, 16, b, brickTex, 5);
+        W(-8, 22, b, 10, brickTex, 5);
+        W(8, 22, b, 10, brickTex, 5);
 
         // === МОСТ y=3.5 ===
         PLATFORM(0, 0, 14, 3, 3.5);
         W(0, -1.5, 14, b, concreteTex, 1.2);
         W(0, 1.5, 14, b, concreteTex, 1.2);
 
-        // === ЛЕСТЕНИЦЫ (внутри зданий) ===
+        // === ЛЕСТЕНИЦЫ ===
         STEPS(-22, -7, 'z', 7, 0.5, 0.5, 1.5, woodTex);
         STEPS(22, -7, 'z', 7, 0.5, 0.5, 1.5, woodTex);
         STEPS(-22, -19, 'z', 7, 0.5, 0.5, 1.5, woodTex);
         STEPS(22, -19, 'z', 7, 0.5, 0.5, 1.5, woodTex);
 
-        // === КРЫШИ (платформы) ===
+        // === КРЫШИ ===
         PLATFORM(-17, 0, 20, 18, 3.55);
         PLATFORM(17, 0, 20, 18, 3.55);
         PLATFORM(-17, -21, 20, 8, 3.55);
@@ -389,13 +389,13 @@
             doors.push({ mesh, x, z, open: false, ry, w });
         }
 
-        addDoor(-16, -9, 0);
-        addDoor(-7, 0, Math.PI / 2);
-        addDoor(16, -9, 0);
-        addDoor(7, 0, Math.PI / 2);
-        addDoor(-16, -17, 0);
-        addDoor(16, -17, 0);
-        addDoor(0, 17, 0, 2);
+        addDoor(-16, -9, 0, 2.0);
+        addDoor(-7, 0, Math.PI / 2, 2.0);
+        addDoor(16, -9, 0, 2.0);
+        addDoor(7, 0, Math.PI / 2, 2.0);
+        addDoor(-16, -17, 0, 2.0);
+        addDoor(16, -17, 0, 2.0);
+        addDoor(0, 17, 0, 2.5);
 
         // === ВЁРОВКИ ===
         const ropeMat = new THREE.MeshPhongMaterial({ color: 0x886633 });
@@ -492,6 +492,31 @@
             scene.add(c); collectibles.push(c);
         });
         document.getElementById('total').textContent = collectibles.length;
+
+        // === ПОЛЫ ВНУТРИ ЗДАНИЙ ===
+        const floorTileTex = (() => {
+            const c = document.createElement('canvas');
+            c.width = 256; c.height = 256;
+            const cx = c.getContext('2d');
+            cx.fillStyle = '#666';
+            cx.fillRect(0, 0, 256, 256);
+            for (let ty = 0; ty < 4; ty++) for (let tx = 0; tx < 4; tx++) {
+                const v = ((tx + ty) % 2) * 10;
+                cx.fillStyle = `rgb(${96+v},${96+v},${100+v})`;
+                cx.fillRect(tx * 64 + 1, ty * 64 + 1, 62, 62);
+            }
+            const t = new THREE.CanvasTexture(c);
+            t.wrapS = t.wrapT = THREE.RepeatWrapping;
+            t.repeat.set(3, 3);
+            return t;
+        })();
+        const floorTileMat = new THREE.MeshPhongMaterial({ map: floorTileTex });
+
+        FLOOR(-16, 0, 18, 18, 0.02, floorTileMat);
+        FLOOR(16, 0, 18, 18, 0.02, floorTileMat);
+        FLOOR(-16, -21, 18, 8, 0.02, floorTileMat);
+        FLOOR(16, -21, 18, 8, 0.02, floorTileMat);
+        FLOOR(0, 22, 16, 10, 0.02, floorTileMat);
 
         // === ЧАСТИЦЫ ===
         const particles = [];
@@ -1170,7 +1195,7 @@
                     const dz = newZ - door.z;
                     const lx = dx * cos + dz * sin;
                     const lz = -dx * sin + dz * cos;
-                    if (Math.abs(lx) < door.w / 2 + r && Math.abs(lz) < 0.2 + r) {
+                    if (Math.abs(lx) < door.w / 2 + r && Math.abs(lz) < b / 2 + r) {
                         return true;
                     }
                 }
