@@ -40,20 +40,134 @@
             text-align: center;
             text-shadow: 1px 1px 2px #000;
         }
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            pointer-events: none;
+        }
+        #crosshair::before, #crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(255,255,255,0.8);
+        }
+        #crosshair::before {
+            width: 2px;
+            height: 20px;
+            left: 9px;
+            top: 0;
+        }
+        #crosshair::after {
+            width: 20px;
+            height: 2px;
+            top: 9px;
+            left: 0;
+        }
+        #ammo {
+            position: absolute;
+            bottom: 50px;
+            right: 30px;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            font-size: 24px;
+            text-shadow: 2px 2px 4px #000;
+        }
+        #kills {
+            position: absolute;
+            bottom: 80px;
+            right: 30px;
+            color: #f44;
+            font-family: Arial, sans-serif;
+            font-size: 20px;
+            text-shadow: 2px 2px 4px #000;
+        }
+        #reload-bar {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 6px;
+            background: rgba(255,255,255,0.15);
+            border-radius: 3px;
+            display: none;
+        }
+        #reload-fill {
+            height: 100%;
+            width: 0%;
+            background: #f80;
+            border-radius: 3px;
+            transition: width 0.05s linear;
+        }
+        .damage-num {
+            position: absolute;
+            color: #ff4444;
+            font-family: Arial, sans-serif;
+            font-weight: bold;
+            font-size: 18px;
+            text-shadow: 1px 1px 2px #000;
+            pointer-events: none;
+            white-space: nowrap;
+            animation: dmgFloat 0.8s ease-out forwards;
+        }
+        .damage-num.headshot {
+            color: #ff0;
+            font-size: 24px;
+        }
+        @keyframes dmgFloat {
+            0% { opacity: 1; transform: translateY(0); }
+            100% { opacity: 0; transform: translateY(-40px); }
+        }
+        #muzzleFlash {
+            position: absolute;
+            bottom: 28%;
+            right: 22%;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: radial-gradient(circle, #fff 0%, #ff8 40%, #f60 70%, transparent 100%);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.05s;
+        }
+        #interact {
+            position: absolute;
+            bottom: 15%;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-family: Arial, sans-serif;
+            font-size: 18px;
+            text-shadow: 2px 2px 4px #000;
+            background: rgba(0,0,0,0.5);
+            padding: 8px 16px;
+            border-radius: 8px;
+            display: none;
+            pointer-events: none;
+        }
     </style>
 </head>
 <body>
     <div id="ui">Собрано: <span id="score">0</span> / <span id="total">0</span></div>
+    <div id="crosshair"></div>
+    <div id="muzzleFlash"></div>
+    <div id="ammo">Патроны: 30 / 30</div>
+    <div id="kills">Убито: 0 / 5</div>
+    <div id="reload-bar"><div id="reload-fill"></div></div>
+    <div id="interact"></div>
     <div id="message"></div>
-    <div id="controls">WASD или стрелки — движение | Мышь — поворот | Собирайте золотые кубики!</div>
+    <div id="controls">WASD / Стрелки — движение | Мышь — поворот | Пробел — прыжок | ЛКМ — стрелять | R — перезарядка | E — действие</div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a2e);
-        scene.fog = new THREE.Fog(0x1a1a2e, 10, 50);
+        scene.fog = new THREE.Fog(0x1a1a2e, 15, 80);
 
         const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-        camera.position.set(0, 2, 5);
+        camera.position.set(0, 2, -12);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
@@ -71,80 +185,991 @@
         const playerGeometry = new THREE.BoxGeometry(0.8, 1.2, 0.8);
         const playerMaterial = new THREE.MeshPhongMaterial({ color: 0x00ff88 });
         const player = new THREE.Mesh(playerGeometry, playerMaterial);
-        player.position.y = 0.6;
+        player.position.set(0, 0.6, -12);
         player.castShadow = true;
         scene.add(player);
 
-        const groundGeo = new THREE.PlaneGeometry(60, 60);
-        const groundMat = new THREE.MeshPhongMaterial({ color: 0x2a2a4a });
+        const groundGeo = new THREE.PlaneGeometry(120, 120);
+        const groundCanvas = document.createElement('canvas');
+        groundCanvas.width = 512; groundCanvas.height = 512;
+        const gctx = groundCanvas.getContext('2d');
+        gctx.fillStyle = '#3a3a3a';
+        gctx.fillRect(0, 0, 512, 512);
+        for (let i = 0; i < 10000; i++) {
+            const v = Math.random() * 20;
+            gctx.fillStyle = `rgb(${58+v},${58+v},${58+v})`;
+            gctx.fillRect(Math.random()*512, Math.random()*512, Math.random()*3+1, Math.random()*3+1);
+        }
+        for (let y = 0; y < 512; y += 64) {
+            gctx.strokeStyle = 'rgba(0,0,0,0.08)';
+            gctx.beginPath(); gctx.moveTo(0, y); gctx.lineTo(512, y); gctx.stroke();
+        }
+        for (let x = 0; x < 512; x += 64) {
+            gctx.beginPath(); gctx.moveTo(x, 0); gctx.lineTo(x, 512); gctx.stroke();
+        }
+        const groundTex = new THREE.CanvasTexture(groundCanvas);
+        groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
+        groundTex.repeat.set(8, 8);
+        const groundMat = new THREE.MeshPhongMaterial({ map: groundTex });
         const ground = new THREE.Mesh(groundGeo, groundMat);
         ground.rotation.x = -Math.PI / 2;
         ground.receiveShadow = true;
         scene.add(ground);
 
-        const wallMaterial = new THREE.MeshPhongMaterial({ color: 0x4a4a6a });
-        const walls = [];
-        const wallPositions = [
-            { x: 0, z: -15, sx: 30, sz: 1 },
-            { x: 0, z: 15, sx: 30, sz: 1 },
-            { x: -15, z: 0, sx: 1, sz: 30 },
-            { x: 15, z: 0, sx: 1, sz: 30 },
-            { x: -5, z: -5, sx: 1, sz: 8 },
-            { x: 5, z: 3, sx: 8, sz: 1 },
-            { x: 8, z: -8, sx: 1, sz: 6 },
-            { x: -8, z: 6, sx: 6, sz: 1 },
-            { x: 3, z: -10, sx: 4, sz: 1 },
-            { x: -10, z: -2, sx: 1, sz: 5 },
-        ];
+        function makeBrickTex(r, g, b) {
+            const c = document.createElement('canvas');
+            c.width = 256; c.height = 256;
+            const cx = c.getContext('2d');
+            cx.fillStyle = `rgb(${r},${g},${b})`;
+            cx.fillRect(0, 0, 256, 256);
+            for (let row = 0; row < 16; row++) {
+                const off = (row % 2) * 16;
+                for (let col = -1; col < 9; col++) {
+                    const bx = col * 32 + off, by = row * 16;
+                    const v = Math.random() * 20 - 10;
+                    cx.fillStyle = `rgb(${r+v},${g+v},${b+v})`;
+                    cx.fillRect(bx + 1, by + 1, 30, 14);
+                }
+            }
+            return new THREE.CanvasTexture(c);
+        }
 
-        wallPositions.forEach(w => {
-            const wallGeo = new THREE.BoxGeometry(w.sx, 3, w.sz);
-            const wall = new THREE.Mesh(wallGeo, wallMaterial);
-            wall.position.set(w.x, 1.5, w.z);
+        function makeConcreteTex() {
+            const c = document.createElement('canvas');
+            c.width = 256; c.height = 256;
+            const cx = c.getContext('2d');
+            cx.fillStyle = '#888';
+            cx.fillRect(0, 0, 256, 256);
+            for (let i = 0; i < 5000; i++) {
+                const v = Math.random() * 30 - 15;
+                cx.fillStyle = `rgba(${136+v},${136+v},${136+v},0.3)`;
+                cx.fillRect(Math.random()*256, Math.random()*256, Math.random()*4+1, Math.random()*2+1);
+            }
+            return new THREE.CanvasTexture(c);
+        }
+
+        function makeWoodTex() {
+            const c = document.createElement('canvas');
+            c.width = 128; c.height = 128;
+            const cx = c.getContext('2d');
+            cx.fillStyle = '#6b4226';
+            cx.fillRect(0, 0, 128, 128);
+            for (let y = 0; y < 128; y++) {
+                const v = Math.sin(y * 0.3) * 8 + Math.random() * 6;
+                cx.fillStyle = `rgb(${107+v},${66+v},${38+v})`;
+                cx.fillRect(0, y, 128, 1);
+            }
+            return new THREE.CanvasTexture(c);
+        }
+
+        const brickTex = makeBrickTex(140, 80, 60);
+        const brickTex2 = makeBrickTex(120, 90, 80);
+        const concreteTex = makeConcreteTex();
+        const woodTex = makeWoodTex();
+
+        const walls = [];
+        const boxes = [];
+
+        function addWall(x, z, sx, sz, mat, h, y) {
+            h = h || 3; y = y || h / 2;
+            const geo = new THREE.BoxGeometry(sx, h, sz);
+            const wall = new THREE.Mesh(geo, mat);
+            wall.position.set(x, y, z);
             wall.castShadow = true;
             wall.receiveShadow = true;
             scene.add(wall);
             walls.push(wall);
-        });
+            return wall;
+        }
+
+        function addFloor(x, z, sx, sz, y, mat) {
+            const geo = new THREE.PlaneGeometry(sx, sz);
+            const floor = new THREE.Mesh(geo, mat || concreteTex);
+            floor.rotation.x = -Math.PI / 2;
+            floor.position.set(x, y, z);
+            floor.receiveShadow = true;
+            scene.add(floor);
+        }
+
+        function addStep(x, z, w, d, h, mat) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(x, h / 2, z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+            boxes.push({ mesh, type: 'low', h, x, z });
+        }
+
+        function addRamp(x, z, dir, steps, stepH, stepD, w, mat) {
+            for (let i = 0; i < steps; i++) {
+                const h = (i + 1) * stepH;
+                const sx = dir === 'x' ? x + i * stepD : x;
+                const sz = dir === 'z' ? z + i * stepD : z;
+                addStep(sx, sz, dir === 'x' ? stepD : w, dir === 'z' ? stepD : w, h, mat);
+            }
+        }
+
+        function addTallBox(x, z, w, h, d, mat) {
+            const geo = new THREE.BoxGeometry(w, h, d);
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set(x, h / 2, z);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+            boxes.push({ mesh, type: 'tall', h, x, z });
+        }
+
+        const bw = 0.3;
+
+        addWall(0, -30, 60, bw, brickTex2);
+        addWall(0, 30, 60, bw, brickTex2);
+        addWall(-30, 0, bw, 60, brickTex2);
+        addWall(30, 0, bw, 60, brickTex2);
+
+        addWall(-14, -10, 12, bw, brickTex);
+        addWall(-14, 4, 12, bw, brickTex);
+        addWall(-20, -3, bw, 14, brickTex);
+        addWall(-8, -3, bw, 14, brickTex);
+        addWall(-14, -3, 12, bw, brickTex, 3.5, 1.75);
+
+        addFloor(-14, -3, 12, 14, 3.5, concreteTex);
+        addWall(-14, 10.5, 12, bw, brickTex);
+        addWall(-8, 3, bw, 14, brickTex);
+        addWall(-20, 3, bw, 14, brickTex);
+
+        addWall(-14, 3, 12, bw, brickTex, 0.3, 7.15);
+        addFloor(-14, 3, 12, 14, 7, concreteTex);
+        addWall(-20, 3, bw, 14, brickTex);
+        addWall(-8, 3, bw, 14, brickTex);
+        addWall(-14, 10.5, 12, bw, brickTex);
+
+        addRamp(-17.5, -8.5, 'z', 8, 0.44, 0.4, 0.8, woodTex);
+
+        addWall(12, -10, 12, bw, brickTex2);
+        addWall(12, 4, 12, bw, brickTex2);
+        addWall(6, -3, bw, 14, brickTex2);
+        addWall(18, -3, bw, 14, brickTex2);
+
+        addWall(12, -3, 12, bw, brickTex2, 0.3, 3.65);
+        addFloor(12, -3, 12, 14, 3.5, concreteTex);
+
+        addWall(6, -3, bw, 14, brickTex2);
+        addWall(18, -3, bw, 14, brickTex2);
+        addWall(12, 10.5, 12, bw, brickTex2);
+
+        addWall(12, 3, 12, bw, brickTex2, 0.3, 7.15);
+        addFloor(12, 3, 12, 14, 7, concreteTex);
+
+        addRamp(15.5, -8.5, 'z', 8, 0.44, 0.4, 0.8, woodTex);
+
+        const bridgeMat = new THREE.MeshPhongMaterial({ map: makeConcreteTex() });
+        addFloor(0, -3, 12, 5, 3.5, bridgeMat);
+        addWall(0, -5.5, 12, bw, concreteTex, 1, 4);
+        addWall(0, -0.5, 12, bw, concreteTex, 1, 4);
+        addWall(-6, -3, bw, 5, concreteTex, 1, 4);
+        addWall(6, -3, bw, 5, concreteTex, 1, 4);
+
+        addWall(-14, -20, 10, bw, brickTex);
+        addWall(-14, -13, 10, bw, brickTex);
+        addWall(-19, -16.5, bw, 7, brickTex);
+        addWall(-9, -16.5, bw, 7, brickTex);
+
+        addWall(-14, -16.5, 10, bw, brickTex, 0.3, 3.65);
+        addFloor(-14, -16.5, 10, 7, 3.5, concreteTex);
+
+        addWall(-19, -16.5, bw, 7, brickTex);
+        addWall(-9, -16.5, bw, 7, brickTex);
+        addWall(-14, -23, 10, bw, brickTex);
+
+        addWall(-14, -16.5, 10, bw, brickTex, 0.3, 7.15);
+        addFloor(-14, -16.5, 10, 7, 7, concreteTex);
+        addWall(-14, -23, 10, bw, brickTex);
+
+        addRamp(-16.5, -19, 'z', 8, 0.44, 0.4, 0.8, woodTex);
+
+        addWall(14, -20, 10, bw, brickTex2);
+        addWall(14, -13, 10, bw, brickTex2);
+        addWall(9, -16.5, bw, 7, brickTex2);
+        addWall(19, -16.5, bw, 7, brickTex2);
+
+        addWall(14, -16.5, 10, bw, brickTex2, 0.3, 3.65);
+        addFloor(14, -16.5, 10, 7, 3.5, concreteTex);
+
+        addRamp(16.5, -19, 'z', 8, 0.44, 0.4, 0.8, woodTex);
+
+        addWall(0, 18, 14, bw, brickTex);
+        addWall(0, 26, 14, bw, brickTex);
+        addWall(-7, 22, bw, 8, brickTex, 5, 2.5);
+        addWall(7, 22, bw, 8, brickTex, 5, 2.5);
+
+        addFloor(0, 22, 14, 8, 0.01, concreteTex);
+
+        const doorMat = new THREE.MeshPhongMaterial({ map: woodTex });
+        const doors = [];
+        function addDoor(x, z, ry, w) {
+            const geo = new THREE.BoxGeometry(w || 1.2, 2.4, 0.1);
+            const mesh = new THREE.Mesh(geo, doorMat);
+            mesh.position.set(x, 1.2, z);
+            mesh.rotation.y = ry || 0;
+            mesh.castShadow = true;
+            scene.add(mesh);
+            const handleGeo = new THREE.BoxGeometry(0.05, 0.08, 0.08);
+            const handleMat = new THREE.MeshPhongMaterial({ color: 0xbbaa44, specular: 0xffd700, shininess: 120 });
+            const handle = new THREE.Mesh(handleGeo, handleMat);
+            handle.position.set(0.4, 0, 0.06);
+            mesh.add(handle);
+            doors.push({ mesh, x, z, open: false, ry });
+        }
+
+        addDoor(-14, -9.7, 0);
+        addDoor(12, -9.7, 0);
+        addDoor(-14, -12.8, 0);
+        addDoor(-14, 3.7, 0);
+        addDoor(12, 3.7, 0);
+        addDoor(0, 21.8, 0, 2);
+
+        const bridges = [];
+        function addBridge(x1, z1, x2, z2, y, w) {
+            const dx = x2 - x1, dz = z2 - z1;
+            const len = Math.sqrt(dx*dx + dz*dz);
+            const geo = new THREE.BoxGeometry(len, 0.15, w || 2);
+            const mat = new THREE.MeshPhongMaterial({ color: 0x666666, specular: 0x888888, shininess: 60 });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.position.set((x1+x2)/2, y, (z1+z2)/2);
+            mesh.rotation.y = Math.atan2(dx, dz);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            scene.add(mesh);
+            const railGeo = new THREE.BoxGeometry(len, 1, 0.05);
+            const railMat = new THREE.MeshPhongMaterial({ color: 0x555555 });
+            const r1 = new THREE.Mesh(railGeo, railMat);
+            r1.position.set((x1+x2)/2, y + 0.5, (z1+z2)/2 - w/2);
+            r1.rotation.y = Math.atan2(dx, dz);
+            scene.add(r1);
+            const r2 = new THREE.Mesh(railGeo, railMat);
+            r2.position.set((x1+x2)/2, y + 0.5, (z1+z2)/2 + w/2);
+            r2.rotation.y = Math.atan2(dx, dz);
+            scene.add(r2);
+            for (let i = 0; i < len; i += 2) {
+                const t = i / len;
+                const px = x1 + dx * t, pz = z1 + dz * t;
+                addTallBox(px, pz, 0.1, 1, w, railMat);
+            }
+            addStep((x1+x2)/2, (z1+z2)/2, len, w, y, mat);
+            bridges.push({ x: (x1+x2)/2, z: (z1+z2)/2, y, r: Math.max(len, w) / 2 + 1 });
+        }
+
+        const ropeMat = new THREE.MeshPhongMaterial({ color: 0x886633 });
+        const ropes = [];
+        function addRope(x1, y1, z1, x2, y2, z2, name) {
+            const dx = x2-x1, dy = y2-y1, dz = z2-z1;
+            const len = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            const segments = 20;
+            for (let i = 0; i < segments; i++) {
+                const t = i / segments;
+                const t2 = (i+1) / segments;
+                const sag1 = Math.sin(t * Math.PI) * 0.15;
+                const sag2 = Math.sin(t2 * Math.PI) * 0.15;
+                const sx = x1 + dx * t, sy = y1 + dy * t + sag1, sz = z1 + dz * t;
+                const ex = x1 + dx * t2, ey = y1 + dy * t2 + sag2, ez = z1 + dz * t2;
+                const segLen = Math.sqrt((ex-sx)**2 + (ey-sy)**2 + (ez-sz)**2);
+                const geo = new THREE.CylinderGeometry(0.03, 0.03, segLen, 6);
+                const rope = new THREE.Mesh(geo, ropeMat);
+                rope.position.set((sx+ex)/2, (sy+ey)/2, (sz+ez)/2);
+                rope.lookAt(ex, ey, ez);
+                rope.rotateX(Math.PI/2);
+                scene.add(rope);
+            }
+            const postGeo = new THREE.CylinderGeometry(0.08, 0.1, 1.5, 8);
+            const postMat = new THREE.MeshPhongMaterial({ color: 0x444444, specular: 0x666666, shininess: 80 });
+            const post1 = new THREE.Mesh(postGeo, postMat);
+            post1.position.set(x1, y1 + 0.75, z1);
+            scene.add(post1);
+            const post2 = new THREE.Mesh(postGeo, postMat);
+            post2.position.set(x2, y2 + 0.75, z2);
+            scene.add(post2);
+            ropes.push({ x1, y1: y1+1, z1, x2, y2: y2+1, z2, name });
+        }
+
+        addRope(-9, 7, -16.5, -9, 3.5, -3, 'Верёвка → Крыша A');
+        addRope(9, 7, -16.5, 9, 3.5, -3, 'Верёвка → Крыша B');
+
+        function addLampPost(x, z) {
+            const poleMat = new THREE.MeshPhongMaterial({ color: 0x444444, specular: 0x666666, shininess: 80 });
+            const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 4, 8), poleMat);
+            pole.position.set(x, 2, z);
+            pole.castShadow = true;
+            scene.add(pole);
+            const arm = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.8), poleMat);
+            arm.position.set(x, 3.9, z + 0.4);
+            scene.add(arm);
+            const lampGeo = new THREE.BoxGeometry(0.2, 0.08, 0.3);
+            const lampMat = new THREE.MeshPhongMaterial({ color: 0xffffcc, emissive: 0xffffaa, emissiveIntensity: 0.5 });
+            const lamp = new THREE.Mesh(lampGeo, lampMat);
+            lamp.position.set(x, 3.85, z + 0.7);
+            scene.add(lamp);
+            const pl = new THREE.PointLight(0xffffcc, 0.6, 12);
+            pl.position.set(x, 3.8, z + 0.7);
+            scene.add(pl);
+        }
+
+        function addBench(x, z, ry) {
+            const seatMat = new THREE.MeshPhongMaterial({ map: woodTex });
+            const seat = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.06, 0.4), seatMat);
+            seat.position.set(x, 0.45, z);
+            seat.rotation.y = ry || 0;
+            seat.castShadow = true;
+            scene.add(seat);
+            const legMat = new THREE.MeshPhongMaterial({ color: 0x333333 });
+            for (const dx of [-0.5, 0.5]) {
+                for (const dz of [-0.15, 0.15]) {
+                    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.45, 6), legMat);
+                    leg.position.set(x + dx, 0.225, z + dz);
+                    scene.add(leg);
+                }
+            }
+            const back = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.4, 0.04), seatMat);
+            back.position.set(x, 0.7, z - 0.18);
+            back.rotation.y = ry || 0;
+            scene.add(back);
+        }
+
+        function addTrashCan(x, z) {
+            const mat = new THREE.MeshPhongMaterial({ color: 0x444444, specular: 0x666666, shininess: 40 });
+            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.6, 12), mat);
+            body.position.set(x, 0.3, z);
+            body.castShadow = true;
+            scene.add(body);
+            const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.04, 12), mat);
+            lid.position.set(x, 0.62, z);
+            scene.add(lid);
+        }
+
+        function addStreetLight(x, z) {
+            const mat = new THREE.MeshPhongMaterial({ color: 0x222222 });
+            const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 6, 8), mat);
+            pole.position.set(x, 3, z);
+            scene.add(pole);
+            const arm = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 1.2), mat);
+            arm.position.set(x + 0.6, 5.9, z);
+            scene.add(arm);
+            const lampMat = new THREE.MeshPhongMaterial({ color: 0xffffdd, emissive: 0xffffaa, emissiveIntensity: 0.4 });
+            const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.2), lampMat);
+            lamp.position.set(x + 1.1, 5.85, z);
+            scene.add(lamp);
+            const pl = new THREE.PointLight(0xffffcc, 0.4, 10);
+            pl.position.set(x + 1.1, 5.8, z);
+            scene.add(pl);
+        }
+
+        addLampPost(-5, -12);
+        addLampPost(5, -12);
+        addLampPost(-5, 8);
+        addLampPost(5, 8);
+        addStreetLight(-25, -12);
+        addStreetLight(25, -12);
+        addStreetLight(-25, 10);
+        addStreetLight(25, 10);
+
+        addBench(-5, -11, 0);
+        addBench(5, -11, Math.PI);
+        addBench(-5, 9, 0);
+        addBench(5, 9, Math.PI);
+
+        addTrashCan(-3, -11);
+        addTrashCan(3, -11);
+        addTrashCan(-3, 9);
+        addTrashCan(3, 9);
+        addTrashCan(-18, -11);
+        addTrashCan(18, -11);
+
+        addTallBox(-22, -11, 1, 0.8, 1, new THREE.MeshPhongMaterial({ color: 0x884422 }));
+        addTallBox(-21, -11, 1, 0.6, 1, new THREE.MeshPhongMaterial({ color: 0x773322 }));
+        addTallBox(22, -11, 1, 0.7, 1, new THREE.MeshPhongMaterial({ color: 0x884422 }));
+
+        const roadMat = new THREE.MeshPhongMaterial({ color: 0x2a2a2a });
+        addFloor(-20, -11, 16, 4, 0.02, roadMat);
+        addFloor(20, -11, 16, 4, 0.02, roadMat);
+        addFloor(-20, 9, 16, 4, 0.02, roadMat);
+        addFloor(20, 9, 16, 4, 0.02, roadMat);
+
+        const lineMat = new THREE.MeshPhongMaterial({ color: 0xdddd44 });
+        for (let i = -10; i < 10; i += 3) {
+            const line = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.005, 0.15), lineMat);
+            line.position.set(i, 0.03, -11);
+            scene.add(line);
+            const line2 = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.005, 0.15), lineMat);
+            line2.position.set(i, 0.03, 9);
+            scene.add(line2);
+        }
+
+        const collectibleSpawns = [
+            [-14, -3, 0.7], [12, -3, 0.7], [-14, 3, 7.3], [12, 3, 7.3],
+            [-14, -16.5, 0.7], [14, -16.5, 0.7], [-14, -16.5, 3.7], [14, -16.5, 3.7],
+            [-14, -16.5, 7.3], [-14, 3, 3.7], [12, 3, 3.7],
+            [0, -3, 3.7], [0, 22, 0.7],
+            [-5, -11, 0.7], [5, -11, 0.7], [-5, 9, 0.7], [5, 9, 0.7],
+            [-22, -16, 0.7], [22, -16, 0.7], [0, 16, 0.7],
+        ];
 
         const collectibles = [];
         const collectibleGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
         const collectibleMat = new THREE.MeshPhongMaterial({
-            color: 0xffd700,
-            emissive: 0xaa8800,
-            emissiveIntensity: 0.3
+            color: 0xffd700, emissive: 0xaa8800, emissiveIntensity: 0.3
         });
 
-        for (let i = 0; i < 15; i++) {
+        collectibleSpawns.forEach(([x, z, y]) => {
             const cube = new THREE.Mesh(collectibleGeo, collectibleMat.clone());
-            let x, z;
-            do {
-                x = (Math.random() - 0.5) * 28;
-                z = (Math.random() - 0.5) * 28;
-            } while (Math.abs(x) < 2 && Math.abs(z) < 2);
-            cube.position.set(x, 0.5, z);
+            cube.position.set(x, y, z);
             cube.castShadow = true;
             scene.add(cube);
             collectibles.push(cube);
-        }
+        });
 
         document.getElementById('total').textContent = collectibles.length;
 
         const particles = [];
-        for (let i = 0; i < 50; i++) {
+        for (let i = 0; i < 30; i++) {
             const pGeo = new THREE.SphereGeometry(0.05);
             const pMat = new THREE.MeshBasicMaterial({ color: 0x6666ff });
             const p = new THREE.Mesh(pGeo, pMat);
-            p.position.set((Math.random() - 0.5) * 40, Math.random() * 10, (Math.random() - 0.5) * 40);
+            p.position.set((Math.random() - 0.5) * 60, Math.random() * 15, (Math.random() - 0.5) * 60);
             scene.add(p);
             particles.push(p);
         }
+
+        const gunGroup = new THREE.Group();
+        const gunParts = {};
+
+        function makeGlockSlideTex() {
+            const c = document.createElement('canvas');
+            c.width = 512; c.height = 256;
+            const cx = c.getContext('2d');
+            cx.fillStyle = '#2a2a2e';
+            cx.fillRect(0, 0, 512, 256);
+            for (let i = 0; i < 8000; i++) {
+                const v = Math.random() * 12 - 6;
+                cx.fillStyle = `rgba(${42+v},${42+v},${46+v},0.5)`;
+                cx.fillRect(Math.random()*512, Math.random()*256, Math.random()*4+1, 0.5);
+            }
+            for (let y = 0; y < 256; y++) {
+                cx.fillStyle = `rgba(0,0,0,${0.02 + Math.random()*0.03})`;
+                cx.fillRect(0, y, 512, 1);
+            }
+            cx.fillStyle = 'rgba(255,255,255,0.03)';
+            cx.fillRect(0, 0, 512, 20);
+            cx.fillStyle = 'rgba(0,0,0,0.06)';
+            cx.fillRect(0, 236, 512, 20);
+            return new THREE.CanvasTexture(c);
+        }
+
+        function makePolymerFrameTex() {
+            const c = document.createElement('canvas');
+            c.width = 256; c.height = 256;
+            const cx = c.getContext('2d');
+            cx.fillStyle = '#1c1c1e';
+            cx.fillRect(0, 0, 256, 256);
+            for (let i = 0; i < 6000; i++) {
+                const v = Math.random() * 8 - 4;
+                cx.fillStyle = `rgba(${28+v},${28+v},${30+v},0.4)`;
+                cx.fillRect(Math.random()*256, Math.random()*256, Math.random()*2+1, Math.random()*2+1);
+            }
+            return new THREE.CanvasTexture(c);
+        }
+
+        function makeGripStippleTex() {
+            const c = document.createElement('canvas');
+            c.width = 256; c.height = 256;
+            const cx = c.getContext('2d');
+            cx.fillStyle = '#1a1a1c';
+            cx.fillRect(0, 0, 256, 256);
+            for (let y = 0; y < 256; y++) {
+                for (let x = 0; x < 256; x++) {
+                    if (Math.random() > 0.6) {
+                        const v = Math.random() * 10;
+                        cx.fillStyle = `rgb(${26+v},${26+v},${28+v})`;
+                        cx.fillRect(x, y, 1, 1);
+                    }
+                }
+            }
+            cx.strokeStyle = 'rgba(40,40,42,0.3)';
+            cx.lineWidth = 0.5;
+            for (let y = 10; y < 256; y += 6) {
+                cx.beginPath();
+                cx.moveTo(0, y);
+                for (let x = 0; x < 256; x += 8) {
+                    cx.lineTo(x + 4, y + (Math.random()-0.5) * 3);
+                }
+                cx.stroke();
+            }
+            return new THREE.CanvasTexture(c);
+        }
+
+        const slideTex = makeGlockSlideTex();
+        const frameTex = makePolymerFrameTex();
+        const stippleTex = makeGripStippleTex();
+
+        const slideMat = new THREE.MeshPhongMaterial({ map: slideTex, specular: 0x555555, shininess: 90 });
+        const frameMat = new THREE.MeshPhongMaterial({ map: frameTex, specular: 0x222222, shininess: 20 });
+        const gripMat = new THREE.MeshPhongMaterial({ map: stippleTex, specular: 0x111111, shininess: 10 });
+        const steelMat = new THREE.MeshPhongMaterial({ color: 0x3a3a3a, specular: 0x888888, shininess: 100 });
+
+        const slideMain = new THREE.Mesh(
+            new THREE.BoxGeometry(0.108, 0.065, 0.50),
+            slideMat
+        );
+        slideMain.position.set(0.25, -0.155, -0.30);
+        gunParts.slideMain = slideMain;
+        gunGroup.add(slideMain);
+
+        const slideTopPlate = new THREE.Mesh(
+            new THREE.BoxGeometry(0.095, 0.008, 0.48),
+            new THREE.MeshPhongMaterial({ map: slideTex, specular: 0x666666, shininess: 110 })
+        );
+        slideTopPlate.position.set(0.25, -0.116, -0.30);
+        gunGroup.add(slideTopPlate);
+
+        const slideChamferL = new THREE.Mesh(
+            new THREE.BoxGeometry(0.006, 0.045, 0.46),
+            slideMat
+        );
+        slideChamferL.position.set(0.199, -0.155, -0.30);
+        slideChamferL.rotation.z = 0.2;
+        gunGroup.add(slideChamferL);
+
+        const slideChamferR = new THREE.Mesh(
+            new THREE.BoxGeometry(0.006, 0.045, 0.46),
+            slideMat
+        );
+        slideChamferR.position.set(0.301, -0.155, -0.30);
+        slideChamferR.rotation.z = -0.2;
+        gunGroup.add(slideChamferR);
+
+        const slideFront = new THREE.Mesh(
+            new THREE.BoxGeometry(0.10, 0.055, 0.01),
+            slideMat
+        );
+        slideFront.position.set(0.25, -0.16, -0.555);
+        gunGroup.add(slideFront);
+
+        const slideRearPlate = new THREE.Mesh(
+            new THREE.BoxGeometry(0.09, 0.05, 0.008),
+            new THREE.MeshPhongMaterial({ color: 0x222222, specular: 0x333333, shininess: 60 })
+        );
+        slideRearPlate.position.set(0.25, -0.16, -0.045);
+        gunGroup.add(slideRearPlate);
+
+        const barrel = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.018, 0.020, 0.52, 16),
+            steelMat
+        );
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(0.25, -0.175, -0.56);
+        gunParts.barrel = barrel;
+        gunGroup.add(barrel);
+
+        const barrelBushing = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.028, 0.028, 0.02, 16),
+            steelMat
+        );
+        barrelBushing.rotation.x = Math.PI / 2;
+        barrelBushing.position.set(0.25, -0.175, -0.565);
+        gunGroup.add(barrelBushing);
+
+        const recoilSpring = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.012, 0.012, 0.15, 8),
+            new THREE.MeshPhongMaterial({ color: 0x555555, specular: 0x999999, shininess: 80 })
+        );
+        recoilSpring.rotation.x = Math.PI / 2;
+        recoilSpring.position.set(0.25, -0.20, -0.44);
+        gunGroup.add(recoilSpring);
+
+        const dustCover = new THREE.Mesh(
+            new THREE.BoxGeometry(0.112, 0.035, 0.25),
+            frameMat
+        );
+        dustCover.position.set(0.25, -0.205, -0.18);
+        gunParts.dustCover = dustCover;
+        gunGroup.add(dustCover);
+
+        const accessoryRail = new THREE.Mesh(
+            new THREE.BoxGeometry(0.06, 0.015, 0.10),
+            frameMat
+        );
+        accessoryRail.position.set(0.25, -0.235, -0.30);
+        gunGroup.add(accessoryRail);
+
+        const railSlot1 = new THREE.Mesh(
+            new THREE.BoxGeometry(0.04, 0.018, 0.01),
+            new THREE.MeshPhongMaterial({ color: 0x111111 })
+        );
+        railSlot1.position.set(0.25, -0.233, -0.28);
+        gunGroup.add(railSlot1);
+
+        const railSlot2 = new THREE.Mesh(
+            new THREE.BoxGeometry(0.04, 0.018, 0.01),
+            new THREE.MeshPhongMaterial({ color: 0x111111 })
+        );
+        railSlot2.position.set(0.25, -0.233, -0.32);
+        gunGroup.add(railSlot2);
+
+        const triggerGuardMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(0.07, 0.012, 0.10),
+            frameMat
+        );
+        triggerGuardMesh.position.set(0.25, -0.27, -0.08);
+        gunGroup.add(triggerGuardMesh);
+
+        const triggerGuardFront = new THREE.Mesh(
+            new THREE.BoxGeometry(0.07, 0.055, 0.012),
+            frameMat
+        );
+        triggerGuardFront.position.set(0.25, -0.248, -0.13);
+        gunGroup.add(triggerGuardFront);
+
+        const triggerGuardBack = new THREE.Mesh(
+            new THREE.BoxGeometry(0.07, 0.035, 0.012),
+            frameMat
+        );
+        triggerGuardBack.position.set(0.25, -0.258, -0.03);
+        gunGroup.add(triggerGuardBack);
+
+        const gripMain = new THREE.Mesh(
+            new THREE.BoxGeometry(0.095, 0.22, 0.085),
+            gripMat
+        );
+        gripMain.position.set(0.25, -0.39, -0.06);
+        gripMain.rotation.x = 0.12;
+        gunParts.gripMain = gripMain;
+        gunGroup.add(gripMain);
+
+        const gripPanelL = new THREE.Mesh(
+            new THREE.BoxGeometry(0.008, 0.16, 0.065),
+            gripMat
+        );
+        gripPanelL.position.set(0.198, -0.38, -0.06);
+        gripPanelL.rotation.x = 0.12;
+        gunGroup.add(gripPanelL);
+
+        const gripPanelR = new THREE.Mesh(
+            new THREE.BoxGeometry(0.008, 0.16, 0.065),
+            gripMat
+        );
+        gripPanelR.position.set(0.302, -0.38, -0.06);
+        gripPanelR.rotation.x = 0.12;
+        gunGroup.add(gripPanelR);
+
+        const gripBackstrap = new THREE.Mesh(
+            new THREE.BoxGeometry(0.08, 0.20, 0.01),
+            gripMat
+        );
+        gripBackstrap.position.set(0.25, -0.38, -0.105);
+        gripBackstrap.rotation.x = 0.12;
+        gunGroup.add(gripBackstrap);
+
+        const fingerGroove = new THREE.Mesh(
+            new THREE.BoxGeometry(0.075, 0.02, 0.015),
+            gripMat
+        );
+        fingerGroove.position.set(0.25, -0.32, -0.02);
+        gunGroup.add(fingerGroove);
+
+        const magRelease = new THREE.Mesh(
+            new THREE.BoxGeometry(0.018, 0.018, 0.02),
+            frameMat
+        );
+        magRelease.position.set(0.185, -0.30, -0.06);
+        gunGroup.add(magRelease);
+
+        const slideStop = new THREE.Mesh(
+            new THREE.BoxGeometry(0.015, 0.008, 0.035),
+            steelMat
+        );
+        slideStop.position.set(0.192, -0.21, -0.12);
+        gunGroup.add(slideStop);
+
+        const slideStopLever = new THREE.Mesh(
+            new THREE.BoxGeometry(0.008, 0.006, 0.025),
+            steelMat
+        );
+        slideStopLever.position.set(0.188, -0.215, -0.10);
+        slideStopLever.rotation.y = 0.1;
+        gunGroup.add(slideStopLever);
+
+        const takedownLever = new THREE.Mesh(
+            new THREE.BoxGeometry(0.015, 0.012, 0.025),
+            steelMat
+        );
+        takedownLever.position.set(0.192, -0.21, -0.22);
+        gunGroup.add(takedownLever);
+
+        const trigger = new THREE.Mesh(
+            new THREE.BoxGeometry(0.018, 0.045, 0.012),
+            steelMat
+        );
+        trigger.position.set(0.25, -0.295, -0.06);
+        trigger.rotation.x = 0.2;
+        gunParts.trigger = trigger;
+        gunGroup.add(trigger);
+
+        const triggerSafety = new THREE.Mesh(
+            new THREE.BoxGeometry(0.012, 0.015, 0.005),
+            new THREE.MeshPhongMaterial({ color: 0xff2200, shininess: 40 })
+        );
+        triggerSafety.position.set(0.25, -0.285, -0.055);
+        triggerSafety.rotation.x = 0.2;
+        gunGroup.add(triggerSafety);
+
+        const magazine = new THREE.Mesh(
+            new THREE.BoxGeometry(0.062, 0.15, 0.052),
+            new THREE.MeshPhongMaterial({ color: 0x222222, specular: 0x444444, shininess: 50 })
+        );
+        magazine.position.set(0.25, -0.40, -0.05);
+        gunParts.magazine = magazine;
+        gunGroup.add(magazine);
+
+        const magBasePlate = new THREE.Mesh(
+            new THREE.BoxGeometry(0.072, 0.012, 0.058),
+            new THREE.MeshPhongMaterial({ color: 0x1a1a1a, specular: 0x333333, shininess: 40 })
+        );
+        magBasePlate.position.set(0.25, -0.475, -0.05);
+        gunParts.magBase = magBasePlate;
+        gunGroup.add(magBasePlate);
+
+        const magFloorPlate = new THREE.Mesh(
+            new THREE.BoxGeometry(0.066, 0.005, 0.054),
+            steelMat
+        );
+        magFloorPlate.position.set(0.25, -0.468, -0.05);
+        gunGroup.add(magFloorPlate);
+
+        const magButton = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.008, 0.008, 0.015, 12),
+            steelMat
+        );
+        magButton.rotation.z = Math.PI / 2;
+        magButton.position.set(0.315, -0.30, -0.06);
+        gunGroup.add(magButton);
+
+        const rearSight = new THREE.Mesh(
+            new THREE.BoxGeometry(0.035, 0.018, 0.012),
+            new THREE.MeshPhongMaterial({ color: 0x1a1a1a, specular: 0x333333, shininess: 40 })
+        );
+        rearSight.position.set(0.25, -0.11, -0.10);
+        gunGroup.add(rearSight);
+
+        const rearSightNotchL = new THREE.Mesh(
+            new THREE.BoxGeometry(0.005, 0.022, 0.012),
+            new THREE.MeshPhongMaterial({ color: 0x1a1a1a })
+        );
+        rearSightNotchL.position.set(0.238, -0.112, -0.10);
+        gunGroup.add(rearSightNotchL);
+
+        const rearSightNotchR = new THREE.Mesh(
+            new THREE.BoxGeometry(0.005, 0.022, 0.012),
+            new THREE.MeshPhongMaterial({ color: 0x1a1a1a })
+        );
+        rearSightNotchR.position.set(0.262, -0.112, -0.10);
+        gunGroup.add(rearSightNotchR);
+
+        const frontSightPost = new THREE.Mesh(
+            new THREE.BoxGeometry(0.01, 0.02, 0.01),
+            new THREE.MeshPhongMaterial({ color: 0x1a1a1a, specular: 0x333333, shininess: 40 })
+        );
+        frontSightPost.position.set(0.25, -0.11, -0.52);
+        gunGroup.add(frontSightPost);
+
+        const frontSightDot = new THREE.Mesh(
+            new THREE.BoxGeometry(0.006, 0.006, 0.004),
+            new THREE.MeshPhongMaterial({ color: 0xff3300, emissive: 0xff2200, emissiveIntensity: 0.6 })
+        );
+        frontSightDot.position.set(0.25, -0.116, -0.525);
+        gunGroup.add(frontSightDot);
+
+        const ejectionPort = new THREE.Mesh(
+            new THREE.BoxGeometry(0.035, 0.015, 0.065),
+            new THREE.MeshPhongMaterial({ color: 0x151515 })
+        );
+        ejectionPort.position.set(0.31, -0.125, -0.22);
+        gunGroup.add(ejectionPort);
+
+        const extractor = new THREE.Mesh(
+            new THREE.BoxGeometry(0.005, 0.01, 0.03),
+            steelMat
+        );
+        extractor.position.set(0.31, -0.12, -0.19);
+        gunGroup.add(extractor);
+
+        const glockLogo = new THREE.Mesh(
+            new THREE.BoxGeometry(0.002, 0.015, 0.035),
+            new THREE.MeshPhongMaterial({ color: 0x333333, specular: 0x555555, shininess: 60 })
+        );
+        glockLogo.position.set(0.195, -0.16, -0.35);
+        gunGroup.add(glockLogo);
+
+        const modelLabel = new THREE.Mesh(
+            new THREE.BoxGeometry(0.002, 0.008, 0.025),
+            new THREE.MeshPhongMaterial({ color: 0x333333 })
+        );
+        modelLabel.position.set(0.195, -0.175, -0.40);
+        gunGroup.add(modelLabel);
+
+        camera.add(gunGroup);
+        scene.add(camera);
+
+        const bullets = [];
+        const muzzleFlash = document.getElementById('muzzleFlash');
+        let gunRecoil = 0;
+        let reloading = false;
+        let reloadTimer = 0;
+        const RELOAD_TIME = 90;
+
+        function playReloadSound() {
+            const dur = 0.4;
+            const bufSize = audioCtx.sampleRate * dur;
+            const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+            const data = buf.getChannelData(0);
+            for (let i = 0; i < bufSize; i++) {
+                const t = i / audioCtx.sampleRate;
+                const click1 = Math.exp(-t * 60) * Math.sin(t * 3000) * 0.3;
+                const slide1 = (t > 0.1 && t < 0.25) ? (Math.random() * 2 - 1) * 0.15 * Math.sin(t * 500) : 0;
+                const click2 = (t > 0.25 && t < 0.3) ? Math.exp(-(t-0.25) * 80) * Math.sin(t * 4000) * 0.35 : 0;
+                const slide2 = (t > 0.3 && t < 0.4) ? (Math.random() * 2 - 1) * 0.1 * Math.sin(t * 600) : 0;
+                data[i] = click1 + slide1 + click2 + slide2;
+            }
+            const src = audioCtx.createBufferSource();
+            src.buffer = buf;
+            src.connect(audioCtx.destination);
+            src.start();
+        }
+
+        const shootingRangeWalls = [];
+        const rangeWallPositions = [
+            { x: 20, z: -22, sx: 8, sz: 1 },
+            { x: 20, z: -16, sx: 1, sz: 6 },
+            { x: 24, z: -19, sx: 1, sz: 6 },
+        ];
+        rangeWallPositions.forEach(w => {
+            const wallGeo = new THREE.BoxGeometry(w.sx, 3, w.sz);
+            const wall = new THREE.Mesh(wallGeo, new THREE.MeshPhongMaterial({ color: 0x554433 }));
+            wall.position.set(w.x, 1.5, w.z);
+            wall.castShadow = true;
+            wall.receiveShadow = true;
+            scene.add(wall);
+            shootingRangeWalls.push(wall);
+            walls.push(wall);
+        });
+
+        const targets = [];
+        const targetPositions = [
+            { x: 16, z: -22, h: 1.5 },
+            { x: 20, z: -22, h: 1.5 },
+            { x: 24, z: -22, h: 1.5 },
+            { x: 18, z: -22, h: 2.8 },
+            { x: 22, z: -22, h: 2.8 },
+        ];
+
+        targetPositions.forEach(tp => {
+            const tg = new THREE.Group();
+
+            const boardGeo = new THREE.CylinderGeometry(0.5, 0.5, 0.08, 16);
+            const boardMat = new THREE.MeshPhongMaterial({ color: 0xffffff });
+            const board = new THREE.Mesh(boardGeo, boardMat);
+            tg.add(board);
+
+            const ring1Geo = new THREE.CylinderGeometry(0.38, 0.38, 0.09, 16);
+            const ring1Mat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+            const ring1 = new THREE.Mesh(ring1Geo, ring1Mat);
+            tg.add(ring1);
+
+            const ring2Geo = new THREE.CylinderGeometry(0.22, 0.22, 0.1, 16);
+            const ring2Mat = new THREE.MeshPhongMaterial({ color: 0xffffff });
+            const ring2 = new THREE.Mesh(ring2Geo, ring2Mat);
+            tg.add(ring2);
+
+            const coreGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.11, 16);
+            const coreMat = new THREE.MeshPhongMaterial({ color: 0xff0000 });
+            const core = new THREE.Mesh(coreGeo, coreMat);
+            tg.add(core);
+
+            const poleGeo = new THREE.CylinderGeometry(0.03, 0.03, tp.h, 8);
+            const poleMat = new THREE.MeshPhongMaterial({ color: 0x666666 });
+            const pole = new THREE.Mesh(poleGeo, poleMat);
+            pole.position.y = -tp.h / 2 - 0.5;
+            tg.add(pole);
+
+            tg.rotation.x = Math.PI / 2;
+            tg.position.set(tp.x, tp.h + 0.5, tp.z);
+            scene.add(tg);
+            targets.push({ group: tg, x: tp.x, y: tp.h + 0.5, z: tp.z, alive: true, hp: 100 });
+        });
 
         const keys = {};
         let yaw = 0;
         let pitch = 0;
         let score = 0;
         let gameWon = false;
+        let velocityY = 0;
+        let onGround = true;
+        const gravity = -0.015;
+        const jumpForce = 0.25;
+        const groundY = 0.6;
+        const raycaster = new THREE.Raycaster();
+        let ammo = 30;
+        let lastShot = 0;
+        let kills = 0;
+        const totalTargets = 5;
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playShootSound() {
+            const dur = 0.15;
+            const bufSize = audioCtx.sampleRate * dur;
+            const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+            const data = buf.getChannelData(0);
+            for (let i = 0; i < bufSize; i++) {
+                const t = i / audioCtx.sampleRate;
+                data[i] = (Math.random() * 2 - 1) * Math.exp(-t * 40) * 0.5;
+            }
+            const src = audioCtx.createBufferSource();
+            src.buffer = buf;
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = 2000;
+            src.connect(filter).connect(audioCtx.destination);
+            src.start();
+        }
+
+        function playHitSound() {
+            const dur = 0.12;
+            const bufSize = audioCtx.sampleRate * dur;
+            const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+            const data = buf.getChannelData(0);
+            for (let i = 0; i < bufSize; i++) {
+                const t = i / audioCtx.sampleRate;
+                data[i] = (Math.random() * 2 - 1) * Math.exp(-t * 50) * 0.3 * Math.sin(t * 800);
+            }
+            const src = audioCtx.createBufferSource();
+            src.buffer = buf;
+            src.connect(audioCtx.destination);
+            src.start();
+        }
+
+        function playKillSound() {
+            const dur = 0.3;
+            const bufSize = audioCtx.sampleRate * dur;
+            const buf = audioCtx.createBuffer(1, bufSize, audioCtx.sampleRate);
+            const data = buf.getChannelData(0);
+            for (let i = 0; i < bufSize; i++) {
+                const t = i / audioCtx.sampleRate;
+                data[i] = (Math.random() * 2 - 1) * Math.exp(-t * 10) * 0.4 * Math.sin(t * 1200 * Math.exp(-t * 5));
+            }
+            const src = audioCtx.createBufferSource();
+            src.buffer = buf;
+            src.connect(audioCtx.destination);
+            src.start();
+        }
 
         document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
         document.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
@@ -157,8 +1182,114 @@
             }
         });
 
+        function spawnDamageNumber(x, y, z, dmg, isHeadshot) {
+            const el = document.createElement('div');
+            el.className = 'damage-num' + (isHeadshot ? ' headshot' : '');
+            el.textContent = '-' + dmg;
+            document.body.appendChild(el);
+            const vec = new THREE.Vector3(x, y, z);
+            vec.project(camera);
+            el.style.left = ((vec.x + 1) / 2 * window.innerWidth) + 'px';
+            el.style.top = ((-vec.y + 1) / 2 * window.innerHeight) + 'px';
+            setTimeout(() => el.remove(), 800);
+        }
+
         renderer.domElement.addEventListener('click', () => {
-            renderer.domElement.requestPointerLock();
+            if (!document.pointerLockElement) {
+                renderer.domElement.requestPointerLock();
+                return;
+            }
+            if (Date.now() - lastShot < 150) return;
+            if (ammo <= 0 || reloading) return;
+            lastShot = Date.now();
+            ammo--;
+            document.getElementById('ammo').textContent = 'Патроны: ' + ammo + ' / 30';
+
+            gunRecoil = 0.08;
+            muzzleFlash.style.opacity = '1';
+            setTimeout(() => muzzleFlash.style.opacity = '0', 60);
+            playShootSound();
+
+            const bulletGeo = new THREE.SphereGeometry(0.04, 6, 6);
+            const bulletMat = new THREE.MeshBasicMaterial({ color: 0xffff00 });
+            const bullet = new THREE.Mesh(bulletGeo, bulletMat);
+            const dir = new THREE.Vector3(0, 0, -1);
+            dir.applyQuaternion(camera.quaternion);
+            bullet.position.copy(camera.position);
+            bullet.position.add(dir.clone().multiplyScalar(0.8));
+            scene.add(bullet);
+            bullets.push({ mesh: bullet, dir: dir.clone(), life: 60 });
+
+            raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+            const targetMeshes = [];
+            targets.forEach(t => {
+                if (t.alive) t.group.children.forEach(c => targetMeshes.push(c));
+            });
+            const hits = raycaster.intersectObjects(targetMeshes);
+            if (hits.length > 0) {
+                const hitPoint = hits[0].point;
+                let closest = null;
+                let closestDist = 999;
+                targets.forEach(t => {
+                    if (!t.alive) return;
+                    const d = hitPoint.distanceTo(new THREE.Vector3(t.x, t.y, t.z));
+                    if (d < closestDist) { closestDist = d; closest = t; }
+                });
+                if (closest && closestDist < 1) {
+                    const isHeadshot = hitPoint.y > closest.y + 0.3;
+                    const dmg = isHeadshot ? 50 : 25;
+                    closest.hp -= dmg;
+                    playHitSound();
+                    spawnDamageNumber(hitPoint.x, hitPoint.y + 0.3, hitPoint.z, dmg, isHeadshot);
+                    closest.group.children.forEach(c => {
+                        c.material.emissive.setHex(0xff0000);
+                        setTimeout(() => c.material.emissive.setHex(0x000000), 100);
+                    });
+                    if (closest.hp <= 0) {
+                        closest.alive = false;
+                        scene.remove(closest.group);
+                        kills++;
+                        playKillSound();
+                        document.getElementById('kills').textContent = 'Убито: ' + kills + ' / ' + totalTargets;
+                    }
+                }
+            }
+        });
+
+        document.addEventListener('keydown', e => {
+            if ((e.key === 'r' || e.key === 'к') && !reloading && ammo < 30) {
+                reloading = true;
+                reloadTimer = RELOAD_TIME;
+                playReloadSound();
+            }
+            if ((e.key === 'e' || e.key === 'у') && !reloading) {
+                let interacted = false;
+                for (const door of doors) {
+                    const dx = player.position.x - door.x;
+                    const dz = player.position.z - door.z;
+                    if (Math.sqrt(dx*dx + dz*dz) < 2.5) {
+                        door.open = !door.open;
+                        door.mesh.rotation.y = door.ry + (door.open ? Math.PI / 2 : 0);
+                        door.mesh.position.x = door.x + (door.open ? 0.6 : 0);
+                        interacted = true;
+                        break;
+                    }
+                }
+                for (const rope of ropes) {
+                    const d1 = Math.sqrt((player.position.x-rope.x1)**2 + (player.position.z-rope.z1)**2);
+                    const d2 = Math.sqrt((player.position.x-rope.x2)**2 + (player.position.z-rope.z2)**2);
+                    if (d1 < 2.5) {
+                        player.position.set(rope.x2, rope.y2 + 0.6, rope.z2);
+                        interacted = true;
+                        break;
+                    }
+                    if (d2 < 2.5) {
+                        player.position.set(rope.x1, rope.y1 + 0.6, rope.z1);
+                        interacted = true;
+                        break;
+                    }
+                }
+            }
         });
 
         function checkCollision(newX, newZ) {
@@ -170,7 +1301,32 @@
                     return true;
                 }
             }
+            for (const box of boxes) {
+                if (box.type === 'low') continue;
+                const r2 = 0.4;
+                const bx = box.x, bz = box.z, bw = 0.75 + r2, bd = 0.75 + r2;
+                if (newX > bx - bw && newX < bx + bw && newZ > bz - bd && newZ < bz + bd) {
+                    return true;
+                }
+            }
             return false;
+        }
+
+        function wouldClimbBox(newX, newZ) {
+            const currentH = getGroundHeight(player.position.x, player.position.z);
+            const newH = getGroundHeight(newX, newZ);
+            return newH > currentH;
+        }
+
+        function getGroundHeight(px, pz) {
+            for (const box of boxes) {
+                if (box.type !== 'low') continue;
+                const hw = 0.75;
+                if (px > box.x - hw && px < box.x + hw && pz > box.z - hw && pz < box.z + hw) {
+                    return box.h;
+                }
+            }
+            return 0;
         }
 
         function animate() {
@@ -180,10 +1336,30 @@
                 const speed = 0.12;
                 let dx = 0, dz = 0;
 
-                if (keys['w'] || keys['arrowup']) { dx += Math.sin(yaw); dz += Math.cos(yaw); }
-                if (keys['s'] || keys['arrowdown']) { dx -= Math.sin(yaw); dz -= Math.cos(yaw); }
-                if (keys['a'] || keys['arrowleft']) { dx += Math.cos(yaw); dz -= Math.sin(yaw); }
-                if (keys['d'] || keys['arrowright']) { dx -= Math.cos(yaw); dz += Math.sin(yaw); }
+                if (keys['w'] || keys['ц'] || keys['arrowup']) { dx -= Math.sin(yaw); dz -= Math.cos(yaw); }
+                if (keys['s'] || keys['ы'] || keys['arrowdown']) { dx += Math.sin(yaw); dz += Math.cos(yaw); }
+                if (keys['a'] || keys['ф'] || keys['arrowleft']) { dx -= Math.cos(yaw); dz += Math.sin(yaw); }
+                if (keys['d'] || keys['в'] || keys['arrowright']) { dx += Math.cos(yaw); dz -= Math.sin(yaw); }
+
+                if (keys[' '] && onGround) {
+                    velocityY = jumpForce;
+                    onGround = false;
+                }
+
+                velocityY += gravity;
+                player.position.y += velocityY;
+
+                const feetY = player.position.y - 0.6;
+                const groundHeight = getGroundHeight(player.position.x, player.position.z);
+                const targetY = groundHeight + 0.6;
+
+                if (feetY <= groundHeight) {
+                    player.position.y = targetY;
+                    velocityY = 0;
+                    onGround = true;
+                } else {
+                    onGround = false;
+                }
 
                 const len = Math.sqrt(dx * dx + dz * dz);
                 if (len > 0) {
@@ -191,8 +1367,8 @@
                     dz = dz / len * speed;
                     const nx = player.position.x + dx;
                     const nz = player.position.z + dz;
-                    if (!checkCollision(nx, player.position.z)) player.position.x = nx;
-                    if (!checkCollision(player.position.x, nz)) player.position.z = nz;
+                    if (!checkCollision(nx, player.position.z) && (onGround ? !wouldClimbBox(nx, player.position.z) : true)) player.position.x = nx;
+                    if (!checkCollision(player.position.x, nz) && (onGround ? !wouldClimbBox(player.position.x, nz) : true)) player.position.z = nz;
                 }
 
                 camera.position.copy(player.position);
@@ -207,7 +1383,9 @@
                     c.rotation.x += 0.01;
                     c.position.y = 0.5 + Math.sin(Date.now() * 0.003 + i) * 0.15;
 
-                    if (player.position.distanceTo(c.position) < 1) {
+                    const dx = player.position.x - c.position.x;
+                    const dz = player.position.z - c.position.z;
+                    if (Math.sqrt(dx * dx + dz * dz) < 1.2 && Math.abs(player.position.y - c.position.y) < 1.5) {
                         scene.remove(c);
                         collectibles.splice(i, 1);
                         score++;
@@ -227,6 +1405,96 @@
                 p.position.y += Math.sin(Date.now() * 0.001 + i) * 0.005;
                 p.position.x += Math.cos(Date.now() * 0.0005 + i) * 0.003;
             });
+
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const b = bullets[i];
+                b.mesh.position.addScaledVector(b.dir, 1.5);
+                b.life--;
+                if (b.life <= 0) {
+                    scene.remove(b.mesh);
+                    bullets.splice(i, 1);
+                }
+            }
+
+            if (gunRecoil > 0 && !reloading) {
+                gunGroup.position.z += gunRecoil;
+                gunGroup.rotation.x = -gunRecoil * 2;
+                gunRecoil *= 0.7;
+                if (gunRecoil < 0.001) {
+                    gunRecoil = 0;
+                    gunGroup.position.z = 0;
+                    gunGroup.rotation.x = 0;
+                }
+            }
+
+            if (reloading) {
+                reloadTimer--;
+                const progress = 1 - reloadTimer / RELOAD_TIME;
+                const reloadBar = document.getElementById('reload-bar');
+                const reloadFill = document.getElementById('reload-fill');
+                reloadBar.style.display = 'block';
+                reloadFill.style.width = (progress * 100) + '%';
+
+                if (progress < 0.15) {
+                    const t = progress / 0.15;
+                    gunGroup.rotation.x = -t * 0.5;
+                    gunGroup.position.y = -t * 0.04;
+                } else if (progress < 0.45) {
+                    const t = (progress - 0.15) / 0.3;
+                    gunParts.magazine.position.y = -0.40 - t * 0.14;
+                    gunParts.magBase.position.y = -0.475 - t * 0.14;
+                } else if (progress < 0.55) {
+                    const t = (progress - 0.45) / 0.1;
+                    gunParts.slideMain.position.z = -0.30 + t * 0.08;
+                } else if (progress < 0.75) {
+                    const t = (progress - 0.55) / 0.2;
+                    gunParts.magazine.position.y = -0.54 + t * 0.14;
+                    gunParts.magBase.position.y = -0.615 + t * 0.14;
+                } else if (progress < 0.85) {
+                    const t = (progress - 0.75) / 0.1;
+                    gunParts.slideMain.position.z = -0.22 + (1 - t) * 0.08;
+                } else {
+                    const t = (progress - 0.85) / 0.15;
+                    gunGroup.rotation.x = -0.5 * (1 - t);
+                    gunGroup.position.y = -0.04 * (1 - t);
+                }
+
+                if (reloadTimer <= 0) {
+                    reloading = false;
+                    ammo = 30;
+                    document.getElementById('ammo').textContent = 'Патроны: 30 / 30';
+                    document.getElementById('reload-bar').style.display = 'none';
+                    document.getElementById('reload-fill').style.width = '0%';
+                    gunGroup.rotation.x = 0;
+                    gunGroup.position.y = 0;
+                    gunParts.magazine.position.y = -0.40;
+                    gunParts.magBase.position.y = -0.475;
+                    gunParts.slideMain.position.z = -0.30;
+                }
+            }
+
+            const interactEl = document.getElementById('interact');
+            let showInteract = '';
+            for (const door of doors) {
+                const dx = player.position.x - door.x;
+                const dz = player.position.z - door.z;
+                if (Math.sqrt(dx*dx + dz*dz) < 2.5) {
+                    showInteract = door.open ? '[E] Закрыть дверь' : '[E] Открыть дверь';
+                    break;
+                }
+            }
+            if (!showInteract) {
+                for (const rope of ropes) {
+                    const d1 = Math.sqrt((player.position.x-rope.x1)**2 + (player.position.z-rope.z1)**2);
+                    const d2 = Math.sqrt((player.position.x-rope.x2)**2 + (player.position.z-rope.z2)**2);
+                    if (d1 < 2.5 || d2 < 2.5) {
+                        showInteract = '[E] ' + rope.name;
+                        break;
+                    }
+                }
+            }
+            interactEl.style.display = showInteract ? 'block' : 'none';
+            interactEl.textContent = showInteract;
 
             renderer.render(scene, camera);
         }
