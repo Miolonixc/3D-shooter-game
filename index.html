@@ -266,377 +266,229 @@
         const brickTex2 = makeBrickTex(120, 90, 80);
         const concreteTex = makeConcreteTex();
         const woodTex = makeWoodTex();
+        const roofTex = makeBrickTex(80, 75, 70);
 
         const walls = [];
         const boxes = [];
 
-        function addWall(x, z, sx, sz, mat, h, y) {
-            h = h || 3; y = y || h / 2;
+        function W(x, z, sx, sz, mat, h) {
+            h = h || 3;
             const geo = new THREE.BoxGeometry(sx, h, sz);
-            const wall = new THREE.Mesh(geo, mat);
-            wall.position.set(x, y, z);
-            wall.castShadow = true;
-            wall.receiveShadow = true;
-            scene.add(wall);
-            walls.push(wall);
-            return wall;
+            const m = new THREE.Mesh(geo, mat);
+            m.position.set(x, h / 2, z);
+            m.castShadow = true; m.receiveShadow = true;
+            scene.add(m); walls.push(m); return m;
         }
 
-        function addFloor(x, z, sx, sz, y, mat) {
-            const geo = new THREE.PlaneGeometry(sx, sz);
-            const floor = new THREE.Mesh(geo, mat || concreteTex);
-            floor.rotation.x = -Math.PI / 2;
-            floor.position.set(x, y, z);
-            floor.receiveShadow = true;
-            scene.add(floor);
+        function FLOOR(x, z, sx, sz, y, mat) {
+            const g = new THREE.PlaneGeometry(sx, sz);
+            const m = new THREE.Mesh(g, mat || concreteTex);
+            m.rotation.x = -Math.PI / 2;
+            m.position.set(x, y, z); m.receiveShadow = true;
+            scene.add(m);
         }
 
-        function addStep(x, z, w, d, h, mat) {
-            const geo = new THREE.BoxGeometry(w, h, d);
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.position.set(x, h / 2, z);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            scene.add(mesh);
-            boxes.push({ mesh, type: 'low', h, x, z });
-        }
-
-        function addRamp(x, z, dir, steps, stepH, stepD, w, mat) {
-            for (let i = 0; i < steps; i++) {
-                const h = (i + 1) * stepH;
-                const sx = dir === 'x' ? x + i * stepD : x;
-                const sz = dir === 'z' ? z + i * stepD : z;
-                addStep(sx, sz, dir === 'x' ? stepD : w, dir === 'z' ? stepD : w, h, mat);
+        function STEPS(x, z, dir, n, sh, sd, w, mat) {
+            for (let i = 0; i < n; i++) {
+                const h = (i + 1) * sh;
+                const geo = new THREE.BoxGeometry(dir === 'x' ? sd : w, h, dir === 'z' ? sd : w);
+                const m = new THREE.Mesh(geo, mat);
+                m.position.set(dir === 'x' ? x + i * sd : x, h / 2, dir === 'z' ? z + i * sd : z);
+                m.castShadow = true; m.receiveShadow = true;
+                scene.add(m);
+                boxes.push({ mesh: m, type: 'low', h, x: dir === 'x' ? x + i * sd : x, z: dir === 'z' ? z + i * sd : z });
             }
         }
 
-        function addTallBox(x, z, w, h, d, mat) {
-            const geo = new THREE.BoxGeometry(w, h, d);
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.position.set(x, h / 2, z);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            scene.add(mesh);
-            boxes.push({ mesh, type: 'tall', h, x, z });
-        }
+        const W3 = (x, z, sx, sz, mat) => W(x, z, sx, sz, mat, 3);
+        const b = 0.4;
 
-        const bw = 0.3;
+        // === ГРАНИЦЫ КАРТЫ ===
+        W3(0, -35, 70, b, brickTex2);
+        W3(0, 35, 70, b, brickTex2);
+        W3(-35, 0, b, 70, brickTex2);
+        W3(35, 0, b, 70, brickTex2);
 
-        addWall(0, -30, 60, bw, brickTex2);
-        addWall(0, 30, 60, bw, brickTex2);
-        addWall(-30, 0, bw, 60, brickTex2);
-        addWall(30, 0, bw, 60, brickTex2);
+        // === ЗДАНИЕ A (левое, 3 этажа) x: -25..-7, z: -9..9 ===
+        W3(-16, -9, 18, b, brickTex);    // южная стена (с проёмом)
+        W(-16, 9, 18, b, brickTex, 3);   // северная стена
+        W(-25, 0, b, 18, brickTex, 3);   // западная стена
+        W(-7, 0, b, 18, brickTex, 3);    // восточная стена (с проёмом моста)
 
-        addWall(-14, -10, 12, bw, brickTex);
-        addWall(-14, 4, 12, bw, brickTex);
-        addWall(-20, -3, bw, 14, brickTex);
-        addWall(-8, -3, bw, 14, brickTex);
-        addWall(-14, -3, 12, bw, brickTex, 3.5, 1.75);
+        FLOOR(-16, 0, 18, 18, 3.5, concreteTex);  // 2 этаж
+        FLOOR(-16, 0, 18, 18, 7, concreteTex);    // 3 этаж
 
-        addFloor(-14, -3, 12, 14, 3.5, concreteTex);
-        addWall(-14, 10.5, 12, bw, brickTex);
-        addWall(-8, 3, bw, 14, brickTex);
-        addWall(-20, 3, bw, 14, brickTex);
+        STEPS(-22, -7, 'z', 8, 0.44, 0.4, 0.8, woodTex); // лестница A
 
-        addWall(-14, 3, 12, bw, brickTex, 0.3, 7.15);
-        addFloor(-14, 3, 12, 14, 7, concreteTex);
-        addWall(-20, 3, bw, 14, brickTex);
-        addWall(-8, 3, bw, 14, brickTex);
-        addWall(-14, 10.5, 12, bw, brickTex);
+        // === ЗДАНИЕ B (правое, 3 этажа) x: 7..25, z: -9..9 ===
+        W3(16, -9, 18, b, brickTex2);
+        W3(16, 9, 18, b, brickTex2);
+        W3(7, 0, b, 18, brickTex2, 3);
+        W3(25, 0, b, 18, brickTex2, 3);
 
-        addRamp(-17.5, -8.5, 'z', 8, 0.44, 0.4, 0.8, woodTex);
+        FLOOR(16, 0, 18, 18, 3.5, concreteTex);
+        FLOOR(16, 0, 18, 18, 7, concreteTex);
 
-        addWall(12, -10, 12, bw, brickTex2);
-        addWall(12, 4, 12, bw, brickTex2);
-        addWall(6, -3, bw, 14, brickTex2);
-        addWall(18, -3, bw, 14, brickTex2);
+        STEPS(22, -7, 'z', 8, 0.44, 0.4, 0.8, woodTex); // лестница B
 
-        addWall(12, -3, 12, bw, brickTex2, 0.3, 3.65);
-        addFloor(12, -3, 12, 14, 3.5, concreteTex);
+        // === МОСТ между A и B (2 этаж, y=3.5) ===
+        FLOOR(0, 0, 14, 3, 3.5, concreteTex);
+        W(0, -1.5, 14, b, concreteTex, 1.2);  // перила юг
+        W(0, 1.5, 14, b, concreteTex, 1.2);   // перила север
 
-        addWall(6, -3, bw, 14, brickTex2);
-        addWall(18, -3, bw, 14, brickTex2);
-        addWall(12, 10.5, 12, bw, brickTex2);
+        // === ЗДАНИЕ C (верх-лево, 3 этажа) x: -25..-7, z: -25..-17 ===
+        W3(-16, -25, 18, b, brickTex);
+        W3(-16, -17, 18, b, brickTex);
+        W3(-25, -21, b, 8, brickTex, 3);
+        W3(-7, -21, b, 8, brickTex, 3);
 
-        addWall(12, 3, 12, bw, brickTex2, 0.3, 7.15);
-        addFloor(12, 3, 12, 14, 7, concreteTex);
+        FLOOR(-16, -21, 18, 8, 3.5, concreteTex);
+        FLOOR(-16, -21, 18, 8, 7, concreteTex);
 
-        addRamp(15.5, -8.5, 'z', 8, 0.44, 0.4, 0.8, woodTex);
+        STEPS(-22, -23, 'z', 8, 0.44, 0.4, 0.8, woodTex);
 
-        const bridgeMat = new THREE.MeshPhongMaterial({ map: makeConcreteTex() });
-        addFloor(0, -3, 12, 5, 3.5, bridgeMat);
-        addWall(0, -5.5, 12, bw, concreteTex, 1, 4);
-        addWall(0, -0.5, 12, bw, concreteTex, 1, 4);
-        addWall(-6, -3, bw, 5, concreteTex, 1, 4);
-        addWall(6, -3, bw, 5, concreteTex, 1, 4);
+        // === ЗДАНИЕ D (верх-право, 2 этажа) x: 7..25, z: -25..-17 ===
+        W3(16, -25, 18, b, brickTex2);
+        W3(16, -17, 18, b, brickTex2);
+        W3(7, -21, b, 8, brickTex2, 3);
+        W3(25, -21, b, 8, brickTex2, 3);
 
-        addWall(-14, -20, 10, bw, brickTex);
-        addWall(-14, -13, 10, bw, brickTex);
-        addWall(-19, -16.5, bw, 7, brickTex);
-        addWall(-9, -16.5, bw, 7, brickTex);
+        FLOOR(16, -21, 18, 8, 3.5, concreteTex);
 
-        addWall(-14, -16.5, 10, bw, brickTex, 0.3, 3.65);
-        addFloor(-14, -16.5, 10, 7, 3.5, concreteTex);
+        STEPS(22, -23, 'z', 8, 0.44, 0.4, 0.8, woodTex);
 
-        addWall(-19, -16.5, bw, 7, brickTex);
-        addWall(-9, -16.5, bw, 7, brickTex);
-        addWall(-14, -23, 10, bw, brickTex);
+        // === СКЛАД (низ) x: -8..8, z: 17..27 ===
+        W(0, 17, 16, b, brickTex, 5);
+        W(0, 27, 16, b, brickTex, 5);
+        W(-8, 22, b, 10, brickTex, 5);
+        W(8, 22, b, 10, brickTex, 5);
+        FLOOR(0, 22, 16, 10, 0.01, concreteTex);
 
-        addWall(-14, -16.5, 10, bw, brickTex, 0.3, 7.15);
-        addFloor(-14, -16.5, 10, 7, 7, concreteTex);
-        addWall(-14, -23, 10, bw, brickTex);
-
-        addRamp(-16.5, -19, 'z', 8, 0.44, 0.4, 0.8, woodTex);
-
-        addWall(14, -20, 10, bw, brickTex2);
-        addWall(14, -13, 10, bw, brickTex2);
-        addWall(9, -16.5, bw, 7, brickTex2);
-        addWall(19, -16.5, bw, 7, brickTex2);
-
-        addWall(14, -16.5, 10, bw, brickTex2, 0.3, 3.65);
-        addFloor(14, -16.5, 10, 7, 3.5, concreteTex);
-
-        addRamp(16.5, -19, 'z', 8, 0.44, 0.4, 0.8, woodTex);
-
-        addWall(0, 18, 14, bw, brickTex);
-        addWall(0, 26, 14, bw, brickTex);
-        addWall(-7, 22, bw, 8, brickTex, 5, 2.5);
-        addWall(7, 22, bw, 8, brickTex, 5, 2.5);
-
-        addFloor(0, 22, 14, 8, 0.01, concreteTex);
-
+        // === ДВЕРИ ===
         const doorMat = new THREE.MeshPhongMaterial({ map: woodTex });
         const doors = [];
         function addDoor(x, z, ry, w) {
-            const geo = new THREE.BoxGeometry(w || 1.2, 2.4, 0.1);
+            const geo = new THREE.BoxGeometry(w || 1.4, 2.6, 0.12);
             const mesh = new THREE.Mesh(geo, doorMat);
-            mesh.position.set(x, 1.2, z);
+            mesh.position.set(x, 1.3, z);
             mesh.rotation.y = ry || 0;
             mesh.castShadow = true;
             scene.add(mesh);
-            const handleGeo = new THREE.BoxGeometry(0.05, 0.08, 0.08);
-            const handleMat = new THREE.MeshPhongMaterial({ color: 0xbbaa44, specular: 0xffd700, shininess: 120 });
-            const handle = new THREE.Mesh(handleGeo, handleMat);
-            handle.position.set(0.4, 0, 0.06);
+            const hMat = new THREE.MeshPhongMaterial({ color: 0xbbaa44, specular: 0xffd700, shininess: 120 });
+            const handle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.08), hMat);
+            handle.position.set(0.5, 0, 0.07);
             mesh.add(handle);
             doors.push({ mesh, x, z, open: false, ry });
         }
 
-        addDoor(-14, -9.7, 0);
-        addDoor(12, -9.7, 0);
-        addDoor(-14, -12.8, 0);
-        addDoor(-14, 3.7, 0);
-        addDoor(12, 3.7, 0);
-        addDoor(0, 21.8, 0, 2);
+        addDoor(-16, -9, Math.PI);  // вход A (юг)
+        addDoor(-7, 0, Math.PI/2);  // вход A (восток, к мосту)
+        addDoor(16, -9, Math.PI);   // вход B (юг)
+        addDoor(7, 0, -Math.PI/2);  // вход B (запад, к мосту)
+        addDoor(-16, -17, Math.PI); // вход C (юг)
+        addDoor(16, -17, Math.PI);  // вход D (юг)
+        addDoor(0, 17, Math.PI, 2); // вход склад (юг)
 
-        const bridges = [];
-        function addBridge(x1, z1, x2, z2, y, w) {
-            const dx = x2 - x1, dz = z2 - z1;
-            const len = Math.sqrt(dx*dx + dz*dz);
-            const geo = new THREE.BoxGeometry(len, 0.15, w || 2);
-            const mat = new THREE.MeshPhongMaterial({ color: 0x666666, specular: 0x888888, shininess: 60 });
-            const mesh = new THREE.Mesh(geo, mat);
-            mesh.position.set((x1+x2)/2, y, (z1+z2)/2);
-            mesh.rotation.y = Math.atan2(dx, dz);
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            scene.add(mesh);
-            const railGeo = new THREE.BoxGeometry(len, 1, 0.05);
-            const railMat = new THREE.MeshPhongMaterial({ color: 0x555555 });
-            const r1 = new THREE.Mesh(railGeo, railMat);
-            r1.position.set((x1+x2)/2, y + 0.5, (z1+z2)/2 - w/2);
-            r1.rotation.y = Math.atan2(dx, dz);
-            scene.add(r1);
-            const r2 = new THREE.Mesh(railGeo, railMat);
-            r2.position.set((x1+x2)/2, y + 0.5, (z1+z2)/2 + w/2);
-            r2.rotation.y = Math.atan2(dx, dz);
-            scene.add(r2);
-            for (let i = 0; i < len; i += 2) {
-                const t = i / len;
-                const px = x1 + dx * t, pz = z1 + dz * t;
-                addTallBox(px, pz, 0.1, 1, w, railMat);
-            }
-            addStep((x1+x2)/2, (z1+z2)/2, len, w, y, mat);
-            bridges.push({ x: (x1+x2)/2, z: (z1+z2)/2, y, r: Math.max(len, w) / 2 + 1 });
-        }
-
+        // === ВЁРОВКИ ===
         const ropeMat = new THREE.MeshPhongMaterial({ color: 0x886633 });
         const ropes = [];
         function addRope(x1, y1, z1, x2, y2, z2, name) {
-            const dx = x2-x1, dy = y2-y1, dz = z2-z1;
-            const len = Math.sqrt(dx*dx + dy*dy + dz*dz);
-            const segments = 20;
-            for (let i = 0; i < segments; i++) {
-                const t = i / segments;
-                const t2 = (i+1) / segments;
-                const sag1 = Math.sin(t * Math.PI) * 0.15;
-                const sag2 = Math.sin(t2 * Math.PI) * 0.15;
-                const sx = x1 + dx * t, sy = y1 + dy * t + sag1, sz = z1 + dz * t;
-                const ex = x1 + dx * t2, ey = y1 + dy * t2 + sag2, ez = z1 + dz * t2;
-                const segLen = Math.sqrt((ex-sx)**2 + (ey-sy)**2 + (ez-sz)**2);
-                const geo = new THREE.CylinderGeometry(0.03, 0.03, segLen, 6);
-                const rope = new THREE.Mesh(geo, ropeMat);
-                rope.position.set((sx+ex)/2, (sy+ey)/2, (sz+ez)/2);
-                rope.lookAt(ex, ey, ez);
-                rope.rotateX(Math.PI/2);
-                scene.add(rope);
+            for (let i = 0; i < 20; i++) {
+                const t = i / 20, t2 = (i+1) / 20;
+                const sag = s => Math.sin(s * Math.PI) * 0.15;
+                const p = (t, s) => ({ x: x1+(x2-x1)*t, y: y1+(y2-y1)*t+sag(s), z: z1+(z2-z1)*t });
+                const a = p(t, t), b2 = p(t2, t2);
+                const len = Math.sqrt((b2.x-a.x)**2+(b2.y-a.y)**2+(b2.z-a.z)**2);
+                const m = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, len, 6), ropeMat);
+                m.position.set((a.x+b2.x)/2, (a.y+b2.y)/2, (a.z+b2.z)/2);
+                m.lookAt(b2.x, b2.y, b2.z); m.rotateX(Math.PI/2);
+                scene.add(m);
             }
-            const postGeo = new THREE.CylinderGeometry(0.08, 0.1, 1.5, 8);
-            const postMat = new THREE.MeshPhongMaterial({ color: 0x444444, specular: 0x666666, shininess: 80 });
-            const post1 = new THREE.Mesh(postGeo, postMat);
-            post1.position.set(x1, y1 + 0.75, z1);
-            scene.add(post1);
-            const post2 = new THREE.Mesh(postGeo, postMat);
-            post2.position.set(x2, y2 + 0.75, z2);
-            scene.add(post2);
+            const pm = new THREE.MeshPhongMaterial({ color: 0x444444 });
+            const post1 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.5, 8), pm);
+            post1.position.set(x1, y1 + 0.75, z1); scene.add(post1);
+            const post2 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.5, 8), pm);
+            post2.position.set(x2, y2 + 0.75, z2); scene.add(post2);
             ropes.push({ x1, y1: y1+1, z1, x2, y2: y2+1, z2, name });
         }
 
-        addRope(-9, 7, -16.5, -9, 3.5, -3, 'Верёвка → Крыша A');
-        addRope(9, 7, -16.5, 9, 3.5, -3, 'Верёвка → Крыша B');
+        addRope(-7, 7, -21, -7, 7, -9, 'Верёвка: крыша C → крыша A');
+        addRope(7, 3.5, -21, 7, 7, -9, 'Верёвка: крыша D → крыша B');
 
-        function addLampPost(x, z) {
-            const poleMat = new THREE.MeshPhongMaterial({ color: 0x444444, specular: 0x666666, shininess: 80 });
-            const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 4, 8), poleMat);
-            pole.position.set(x, 2, z);
-            pole.castShadow = true;
-            scene.add(pole);
-            const arm = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.8), poleMat);
-            arm.position.set(x, 3.9, z + 0.4);
-            scene.add(arm);
-            const lampGeo = new THREE.BoxGeometry(0.2, 0.08, 0.3);
-            const lampMat = new THREE.MeshPhongMaterial({ color: 0xffffcc, emissive: 0xffffaa, emissiveIntensity: 0.5 });
-            const lamp = new THREE.Mesh(lampGeo, lampMat);
-            lamp.position.set(x, 3.85, z + 0.7);
-            scene.add(lamp);
+        // === УЛИЧНЫЕ ЭЛЕМЕНТЫ ===
+        function addLamp(x, z) {
+            const pm = new THREE.MeshPhongMaterial({ color: 0x444444, specular: 0x666666, shininess: 80 });
+            const p = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 4, 8), pm);
+            p.position.set(x, 2, z); p.castShadow = true; scene.add(p);
+            const a = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.8), pm);
+            a.position.set(x, 3.9, z + 0.4); scene.add(a);
+            const l = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.08, 0.3),
+                new THREE.MeshPhongMaterial({ color: 0xffffcc, emissive: 0xffffaa, emissiveIntensity: 0.5 }));
+            l.position.set(x, 3.85, z + 0.7); scene.add(l);
             const pl = new THREE.PointLight(0xffffcc, 0.6, 12);
-            pl.position.set(x, 3.8, z + 0.7);
-            scene.add(pl);
+            pl.position.set(x, 3.8, z + 0.7); scene.add(pl);
         }
 
-        function addBench(x, z, ry) {
-            const seatMat = new THREE.MeshPhongMaterial({ map: woodTex });
-            const seat = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.06, 0.4), seatMat);
-            seat.position.set(x, 0.45, z);
-            seat.rotation.y = ry || 0;
-            seat.castShadow = true;
-            scene.add(seat);
-            const legMat = new THREE.MeshPhongMaterial({ color: 0x333333 });
-            for (const dx of [-0.5, 0.5]) {
-                for (const dz of [-0.15, 0.15]) {
-                    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.45, 6), legMat);
-                    leg.position.set(x + dx, 0.225, z + dz);
-                    scene.add(leg);
-                }
-            }
-            const back = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.4, 0.04), seatMat);
-            back.position.set(x, 0.7, z - 0.18);
-            back.rotation.y = ry || 0;
-            scene.add(back);
+        function addBench(x, z) {
+            const sm = new THREE.MeshPhongMaterial({ map: woodTex });
+            const s = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.06, 0.4), sm);
+            s.position.set(x, 0.45, z); s.castShadow = true; scene.add(s);
+            const bk = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.4, 0.04), sm);
+            bk.position.set(x, 0.7, z - 0.18); scene.add(bk);
+            const lm = new THREE.MeshPhongMaterial({ color: 0x333333 });
+            [-0.5, 0.5].forEach(dx => [-0.15, 0.15].forEach(dz => {
+                const lg = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.45, 6), lm);
+                lg.position.set(x + dx, 0.225, z + dz); scene.add(lg);
+            }));
         }
 
-        function addTrashCan(x, z) {
-            const mat = new THREE.MeshPhongMaterial({ color: 0x444444, specular: 0x666666, shininess: 40 });
-            const body = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.6, 12), mat);
-            body.position.set(x, 0.3, z);
-            body.castShadow = true;
-            scene.add(body);
-            const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.04, 12), mat);
-            lid.position.set(x, 0.62, z);
-            scene.add(lid);
+        function addTrash(x, z) {
+            const m = new THREE.MeshPhongMaterial({ color: 0x444444 });
+            const b = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 0.6, 12), m);
+            b.position.set(x, 0.3, z); b.castShadow = true; scene.add(b);
+            const l = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.04, 12), m);
+            l.position.set(x, 0.62, z); scene.add(l);
         }
 
-        function addStreetLight(x, z) {
-            const mat = new THREE.MeshPhongMaterial({ color: 0x222222 });
-            const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.06, 6, 8), mat);
-            pole.position.set(x, 3, z);
-            scene.add(pole);
-            const arm = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.03, 1.2), mat);
-            arm.position.set(x + 0.6, 5.9, z);
-            scene.add(arm);
-            const lampMat = new THREE.MeshPhongMaterial({ color: 0xffffdd, emissive: 0xffffaa, emissiveIntensity: 0.4 });
-            const lamp = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.2), lampMat);
-            lamp.position.set(x + 1.1, 5.85, z);
-            scene.add(lamp);
-            const pl = new THREE.PointLight(0xffffcc, 0.4, 10);
-            pl.position.set(x + 1.1, 5.8, z);
-            scene.add(pl);
-        }
+        addLamp(-4, -13); addLamp(4, -13);
+        addLamp(-4, 13); addLamp(4, 13);
+        addLamp(-30, -13); addLamp(30, -13);
+        addLamp(-30, 13); addLamp(30, 13);
 
-        addLampPost(-5, -12);
-        addLampPost(5, -12);
-        addLampPost(-5, 8);
-        addLampPost(5, 8);
-        addStreetLight(-25, -12);
-        addStreetLight(25, -12);
-        addStreetLight(-25, 10);
-        addStreetLight(25, 10);
+        addBench(-3, -13); addBench(3, -13);
+        addBench(-3, 13); addBench(3, 13);
 
-        addBench(-5, -11, 0);
-        addBench(5, -11, Math.PI);
-        addBench(-5, 9, 0);
-        addBench(5, 9, Math.PI);
+        addTrash(-2, -13); addTrash(2, -13);
+        addTrash(-2, 13); addTrash(2, 13);
 
-        addTrashCan(-3, -11);
-        addTrashCan(3, -11);
-        addTrashCan(-3, 9);
-        addTrashCan(3, 9);
-        addTrashCan(-18, -11);
-        addTrashCan(18, -11);
-
-        addTallBox(-22, -11, 1, 0.8, 1, new THREE.MeshPhongMaterial({ color: 0x884422 }));
-        addTallBox(-21, -11, 1, 0.6, 1, new THREE.MeshPhongMaterial({ color: 0x773322 }));
-        addTallBox(22, -11, 1, 0.7, 1, new THREE.MeshPhongMaterial({ color: 0x884422 }));
-
-        const roadMat = new THREE.MeshPhongMaterial({ color: 0x2a2a2a });
-        addFloor(-20, -11, 16, 4, 0.02, roadMat);
-        addFloor(20, -11, 16, 4, 0.02, roadMat);
-        addFloor(-20, 9, 16, 4, 0.02, roadMat);
-        addFloor(20, 9, 16, 4, 0.02, roadMat);
-
+        // Дорожная разметка
         const lineMat = new THREE.MeshPhongMaterial({ color: 0xdddd44 });
-        for (let i = -10; i < 10; i += 3) {
-            const line = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.005, 0.15), lineMat);
-            line.position.set(i, 0.03, -11);
-            scene.add(line);
-            const line2 = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.005, 0.15), lineMat);
-            line2.position.set(i, 0.03, 9);
-            scene.add(line2);
+        for (let i = -10; i <= 10; i += 3) {
+            const l = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.005, 0.15), lineMat);
+            l.position.set(i, 0.03, -13); scene.add(l);
+            const l2 = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.005, 0.15), lineMat);
+            l2.position.set(i, 0.03, 13); scene.add(l2);
         }
 
-        const collectibleSpawns = [
-            [-14, -3, 0.7], [12, -3, 0.7], [-14, 3, 7.3], [12, 3, 7.3],
-            [-14, -16.5, 0.7], [14, -16.5, 0.7], [-14, -16.5, 3.7], [14, -16.5, 3.7],
-            [-14, -16.5, 7.3], [-14, 3, 3.7], [12, 3, 3.7],
-            [0, -3, 3.7], [0, 22, 0.7],
-            [-5, -11, 0.7], [5, -11, 0.7], [-5, 9, 0.7], [5, 9, 0.7],
-            [-22, -16, 0.7], [22, -16, 0.7], [0, 16, 0.7],
-        ];
-
+        // === КОЛЛЕКТИБЛЫ ===
         const collectibles = [];
         const collectibleGeo = new THREE.BoxGeometry(0.5, 0.5, 0.5);
-        const collectibleMat = new THREE.MeshPhongMaterial({
-            color: 0xffd700, emissive: 0xaa8800, emissiveIntensity: 0.3
+        const collectibleMat = new THREE.MeshPhongMaterial({ color: 0xffd700, emissive: 0xaa8800, emissiveIntensity: 0.3 });
+        [[-16,0,0.7],[16,0,0.7],[-16,0,3.9],[16,0,3.9],[-16,0,7.2],[16,0,7.2],
+         [-16,-21,0.7],[16,-21,0.7],[-16,-21,3.9],[16,-21,3.9],
+         [0,0,3.9],[0,22,1],[0,22,3],[-5,-13,0.7],[5,-13,0.7]].forEach(([x,z,y]) => {
+            const c = new THREE.Mesh(collectibleGeo, collectibleMat.clone());
+            c.position.set(x, y, z); c.castShadow = true;
+            scene.add(c); collectibles.push(c);
         });
-
-        collectibleSpawns.forEach(([x, z, y]) => {
-            const cube = new THREE.Mesh(collectibleGeo, collectibleMat.clone());
-            cube.position.set(x, y, z);
-            cube.castShadow = true;
-            scene.add(cube);
-            collectibles.push(cube);
-        });
-
         document.getElementById('total').textContent = collectibles.length;
 
+        // === ЧАСТИЦЫ ===
         const particles = [];
         for (let i = 0; i < 30; i++) {
-            const pGeo = new THREE.SphereGeometry(0.05);
-            const pMat = new THREE.MeshBasicMaterial({ color: 0x6666ff });
-            const p = new THREE.Mesh(pGeo, pMat);
-            p.position.set((Math.random() - 0.5) * 60, Math.random() * 15, (Math.random() - 0.5) * 60);
-            scene.add(p);
-            particles.push(p);
+            const p = new THREE.Mesh(new THREE.SphereGeometry(0.05), new THREE.MeshBasicMaterial({ color: 0x6666ff }));
+            p.position.set((Math.random()-0.5)*70, Math.random()*15, (Math.random()-0.5)*70);
+            scene.add(p); particles.push(p);
         }
 
         const gunGroup = new THREE.Group();
