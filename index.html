@@ -365,11 +365,35 @@
         STEPS(-22, -19, 'z', 7, 0.5, 0.5, 1.5, woodTex);
         STEPS(22, -19, 'z', 7, 0.5, 0.5, 1.5, woodTex);
 
-        // === КРЫШИ ===
-        PLATFORM(-17, 0, 20, 18, 3.55);
-        PLATFORM(17, 0, 20, 18, 3.55);
-        PLATFORM(-17, -21, 20, 8, 3.55);
-        PLATFORM(17, -21, 20, 8, 3.55);
+        // === КРЫШИ с текстурой ===
+        const roofTex = (() => {
+            const c = document.createElement('canvas');
+            c.width = 256; c.height = 256;
+            const cx = c.getContext('2d');
+            cx.fillStyle = '#5a5a5a';
+            cx.fillRect(0, 0, 256, 256);
+            for (let i = 0; i < 3000; i++) {
+                const v = Math.random() * 20;
+                cx.fillStyle = `rgba(${90+v},${90+v},${90+v},0.4)`;
+                cx.fillRect(Math.random()*256, Math.random()*256, Math.random()*4+1, 1);
+            }
+            cx.strokeStyle = 'rgba(0,0,0,0.15)';
+            cx.lineWidth = 1;
+            for (let i = 0; i < 256; i += 32) {
+                cx.beginPath(); cx.moveTo(i, 0); cx.lineTo(i, 256); cx.stroke();
+                cx.beginPath(); cx.moveTo(0, i); cx.lineTo(256, i); cx.stroke();
+            }
+            const t = new THREE.CanvasTexture(c);
+            t.wrapS = t.wrapT = THREE.RepeatWrapping;
+            t.repeat.set(4, 4);
+            return t;
+        })();
+        const roofMat = new THREE.MeshPhongMaterial({ map: roofTex });
+
+        PLATFORM(-17, 0, 20, 18, 3.55, roofMat);
+        PLATFORM(17, 0, 20, 18, 3.55, roofMat);
+        PLATFORM(-17, -21, 20, 8, 3.55, roofMat);
+        PLATFORM(17, -21, 20, 8, 3.55, roofMat);
 
         // === ДВЕРИ ===
         const doorMat = new THREE.MeshPhongMaterial({ map: woodTex });
@@ -401,23 +425,34 @@
         const ropeMat = new THREE.MeshPhongMaterial({ color: 0x886633 });
         const ropes = [];
         function addRope(x1, y1, z1, x2, y2, z2, name) {
-            for (let i = 0; i < 20; i++) {
-                const t = i / 20, t2 = (i + 1) / 20;
-                const sag = s => Math.sin(s * Math.PI) * 0.15;
-                const pk = (t, s) => ({ x: x1 + (x2 - x1) * t, y: y1 + (y2 - y1) * t + sag(s), z: z1 + (z2 - z1) * t });
-                const a = pk(t, t), bt = pk(t2, t2);
-                const len = Math.sqrt((bt.x - a.x) ** 2 + (bt.y - a.y) ** 2 + (bt.z - a.z) ** 2);
-                const m = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, len, 6), ropeMat);
-                m.position.set((a.x + bt.x) / 2, (a.y + bt.y) / 2, (a.z + bt.z) / 2);
-                m.lookAt(bt.x, bt.y, bt.z); m.rotateX(Math.PI / 2);
+            const dx = x2 - x1, dy = y2 - y1, dz = z2 - z1;
+            const len = Math.sqrt(dx * dx + dy * dy + dz * dz);
+            const segments = 20;
+            for (let i = 0; i < segments; i++) {
+                const t1 = i / segments, t2 = (i + 1) / segments;
+                const sag1 = Math.sin(t1 * Math.PI) * 0.15;
+                const sag2 = Math.sin(t2 * Math.PI) * 0.15;
+                const ax = x1 + dx * t1, ay = y1 + dy * t1 + sag1, az = z1 + dz * t1;
+                const bx = x1 + dx * t2, by = y1 + dy * t2 + sag2, bz = z1 + dz * t2;
+                const segLen = Math.sqrt((bx - ax) ** 2 + (by - ay) ** 2 + (bz - az) ** 2);
+                if (segLen < 0.001) continue;
+                const m = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, segLen, 6), ropeMat);
+                m.position.set((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
+                m.lookAt(new THREE.Vector3(bx, by, bz));
+                m.rotateX(Math.PI / 2);
                 scene.add(m);
             }
             const pm = new THREE.MeshPhongMaterial({ color: 0x444444 });
-            const p1 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.5, 8), pm);
-            p1.position.set(x1, y1 + 0.75, z1); scene.add(p1);
-            const p2 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 1.5, 8), pm);
-            p2.position.set(x2, y2 + 0.75, z2); scene.add(p2);
-            ropes.push({ x1, y1: y1 + 1, z1, x2, y2: y2 + 1, z2, name });
+            const p1 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2, 8), pm);
+            p1.position.set(x1, y1 + 1, z1); scene.add(p1);
+            const p2 = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 2, 8), pm);
+            p2.position.set(x2, y2 + 1, z2); scene.add(p2);
+            const ballMat = new THREE.MeshPhongMaterial({ color: 0xff4400, emissive: 0xaa2200, emissiveIntensity: 0.3 });
+            const ball1 = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), ballMat);
+            ball1.position.set(x1, y1 + 2.1, z1); scene.add(ball1);
+            const ball2 = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), ballMat);
+            ball2.position.set(x2, y2 + 2.1, z2); scene.add(ball2);
+            ropes.push({ x1, y1: y1 + 2, z1, x2, y2: y2 + 2, z2, name });
         }
 
         addRope(-7, 3.55, -21, -7, 3.55, -9, 'Верёвка: крыша C → крыша A');
@@ -931,16 +966,17 @@
             src.start();
         }
 
+        // === ТИР ===
         const shootingRangeWalls = [];
         const rangeWallPositions = [
-            { x: 20, z: -22, sx: 8, sz: 1 },
-            { x: 20, z: -16, sx: 1, sz: 6 },
-            { x: 24, z: -19, sx: 1, sz: 6 },
+            { x: 30, z: 10, sx: 1, sz: 8 },
+            { x: 26, z: 6, sx: 1, sz: 8 },
+            { x: 28, z: 2, sx: 5, sz: 1 },
         ];
         rangeWallPositions.forEach(w => {
-            const wallGeo = new THREE.BoxGeometry(w.sx, 3, w.sz);
+            const wallGeo = new THREE.BoxGeometry(w.sx, 4, w.sz);
             const wall = new THREE.Mesh(wallGeo, new THREE.MeshPhongMaterial({ color: 0x554433 }));
-            wall.position.set(w.x, 1.5, w.z);
+            wall.position.set(w.x, 2, w.z);
             wall.castShadow = true;
             wall.receiveShadow = true;
             scene.add(wall);
@@ -950,11 +986,11 @@
 
         const targets = [];
         const targetPositions = [
-            { x: 16, z: -22, h: 1.5 },
-            { x: 20, z: -22, h: 1.5 },
-            { x: 24, z: -22, h: 1.5 },
-            { x: 18, z: -22, h: 2.8 },
-            { x: 22, z: -22, h: 2.8 },
+            { x: 28, z: 6, h: 1.5 },
+            { x: 30, z: 6, h: 1.5 },
+            { x: 32, z: 6, h: 1.5 },
+            { x: 29, z: 6, h: 2.8 },
+            { x: 31, z: 6, h: 2.8 },
         ];
 
         targetPositions.forEach(tp => {
