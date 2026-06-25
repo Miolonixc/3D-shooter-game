@@ -159,7 +159,7 @@
     <div id="reload-bar"><div id="reload-fill"></div></div>
     <div id="interact"></div>
     <div id="message"></div>
-    <div id="controls">WASD / Стрелки — движение | Мышь — поворот | Пробел — прыжок | ЛКМ — стрелять | R — перезарядка | E — действие</div>
+    <div id="controls">WASD / Стрелки — движение | Мышь — поворот | Пробел — прыжок | ЛКМ — стрелять | R — перезарядка | 1/2 — оружие | E — действие</div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
         const scene = new THREE.Scene();
@@ -567,21 +567,42 @@
             const c = document.createElement('canvas');
             c.width = 512; c.height = 256;
             const cx = c.getContext('2d');
-            cx.fillStyle = '#2a2a2e';
+            // воронёная сталь — холодный тёмно-сине-чёрный градиент
+            const g = cx.createLinearGradient(0, 0, 0, 256);
+            g.addColorStop(0, '#23262d');
+            g.addColorStop(0.5, '#15171c');
+            g.addColorStop(1, '#0d0e12');
+            cx.fillStyle = g;
             cx.fillRect(0, 0, 512, 256);
-            for (let i = 0; i < 8000; i++) {
-                const v = Math.random() * 12 - 6;
-                cx.fillStyle = `rgba(${42+v},${42+v},${46+v},0.5)`;
-                cx.fillRect(Math.random()*512, Math.random()*256, Math.random()*4+1, 0.5);
+            // продольная шлифовка металла
+            for (let i = 0; i < 6000; i++) {
+                const v = Math.random() * 14 - 7;
+                cx.fillStyle = `rgba(${30+v},${33+v},${40+v},0.35)`;
+                cx.fillRect(Math.random()*512, Math.random()*256, Math.random()*6+2, 0.6);
             }
-            for (let y = 0; y < 256; y++) {
-                cx.fillStyle = `rgba(0,0,0,${0.02 + Math.random()*0.03})`;
-                cx.fillRect(0, y, 512, 1);
+            // износ: оголённый светлый металл, гуще у верхней и нижней кромок
+            for (let i = 0; i < 280; i++) {
+                const edge = Math.random();
+                const y = edge < 0.5 ? Math.random()*42 : 214 + Math.random()*42;
+                const x = Math.random()*512, len = Math.random()*18 + 4;
+                cx.strokeStyle = `rgba(190,196,206,${0.10 + Math.random()*0.30})`;
+                cx.lineWidth = Math.random()*0.8 + 0.3;
+                cx.beginPath(); cx.moveTo(x, y); cx.lineTo(x + len, y + (Math.random()-0.5)*3); cx.stroke();
             }
-            cx.fillStyle = 'rgba(255,255,255,0.03)';
-            cx.fillRect(0, 0, 512, 20);
-            cx.fillStyle = 'rgba(0,0,0,0.06)';
-            cx.fillRect(0, 236, 512, 20);
+            // редкие длинные царапины по всей поверхности
+            for (let i = 0; i < 32; i++) {
+                cx.strokeStyle = `rgba(175,180,190,${0.08 + Math.random()*0.16})`;
+                cx.lineWidth = 0.4;
+                const x = Math.random()*512, y = Math.random()*256;
+                cx.beginPath(); cx.moveTo(x, y); cx.lineTo(x + Math.random()*60 - 30, y + Math.random()*8 - 4); cx.stroke();
+            }
+            // потёртые кромки (бликующая бронза/сталь сверху и снизу)
+            const top = cx.createLinearGradient(0, 0, 0, 16);
+            top.addColorStop(0, 'rgba(150,156,168,0.40)'); top.addColorStop(1, 'rgba(150,156,168,0)');
+            cx.fillStyle = top; cx.fillRect(0, 0, 512, 16);
+            const bot = cx.createLinearGradient(0, 240, 0, 256);
+            bot.addColorStop(0, 'rgba(0,0,0,0)'); bot.addColorStop(1, 'rgba(125,130,140,0.30)');
+            cx.fillStyle = bot; cx.fillRect(0, 240, 512, 16);
             return new THREE.CanvasTexture(c);
         }
 
@@ -631,7 +652,7 @@
         const frameTex = makePolymerFrameTex();
         const stippleTex = makeGripStippleTex();
 
-        const slideMat = new THREE.MeshPhongMaterial({ map: slideTex, specular: 0x555555, shininess: 90 });
+        const slideMat = new THREE.MeshPhongMaterial({ map: slideTex, specular: 0x7a8090, shininess: 130 });
         const frameMat = new THREE.MeshPhongMaterial({ map: frameTex, specular: 0x222222, shininess: 20 });
         const gripMat = new THREE.MeshPhongMaterial({ map: stippleTex, specular: 0x111111, shininess: 10 });
         const steelMat = new THREE.MeshPhongMaterial({ color: 0x3a3a3a, specular: 0x888888, shininess: 100 });
@@ -939,6 +960,29 @@
         camera.add(gunGroup);
         scene.add(camera);
 
+        // === ПИСТОЛЕТ-ПУЛЕМЁТ (SMG) ===
+        const smgGroup = new THREE.Group();
+        const smgMetal = new THREE.MeshPhongMaterial({ map: slideTex, specular: 0x6a7080, shininess: 90 });
+        const smgPoly = gripMat;
+        const smgBody = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.15, 0.62), smgMetal);
+        smgBody.position.set(0.25, -0.17, -0.42); smgGroup.add(smgBody);
+        const smgShroud = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.24, 14), smgMetal);
+        smgShroud.rotation.x = Math.PI / 2; smgShroud.position.set(0.25, -0.165, -0.70); smgGroup.add(smgShroud);
+        const smgBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.34, 12), steelMat);
+        smgBarrel.rotation.x = Math.PI / 2; smgBarrel.position.set(0.25, -0.165, -0.80); smgGroup.add(smgBarrel);
+        const smgMag = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.36, 0.10), smgPoly);
+        smgMag.position.set(0.25, -0.41, -0.33); smgMag.rotation.x = -0.12; smgGroup.add(smgMag);
+        const smgGrip = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.20, 0.10), smgPoly);
+        smgGrip.position.set(0.25, -0.30, -0.15); smgGrip.rotation.x = 0.28; smgGroup.add(smgGrip);
+        const smgFore = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.14, 0.09), smgPoly);
+        smgFore.position.set(0.25, -0.275, -0.60); smgGroup.add(smgFore);
+        const smgStock = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.10, 0.20), smgMetal);
+        smgStock.position.set(0.25, -0.16, -0.03); smgGroup.add(smgStock);
+        const smgSight = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.035, 0.12), steelMat);
+        smgSight.position.set(0.25, -0.082, -0.42); smgGroup.add(smgSight);
+        smgGroup.visible = false;
+        camera.add(smgGroup);
+
         const bullets = [];
         const muzzleFlash = document.getElementById('muzzleFlash');
         let gunRecoil = 0;
@@ -1040,6 +1084,35 @@
         const raycaster = new THREE.Raycaster();
         let ammo = 30;
         let lastShot = 0;
+
+        // === ОРУЖИЕ: пистолет + SMG, переключение 1/2 ===
+        const WEAPONS = {
+            pistol: { name: 'Glock 17', group: gunGroup, mag: 30, fireRate: 150, dmg: 25, recoil: 0.08, auto: false },
+            smg:    { name: 'SMG',      group: smgGroup, mag: 25, fireRate: 70,  dmg: 16, recoil: 0.05, auto: true }
+        };
+        let currentWeapon = 'pistol';
+        let maxAmmo = WEAPONS.pistol.mag;
+        let activeGun = gunGroup;
+        const weaponAmmo = { pistol: 30, smg: 25 };
+        let mouseDown = false;
+
+        function updateAmmoHUD() {
+            document.getElementById('ammo').textContent = WEAPONS[currentWeapon].name + ': ' + ammo + ' / ' + maxAmmo;
+        }
+        function switchWeapon(name) {
+            if (name === currentWeapon || reloading || !WEAPONS[name]) return;
+            weaponAmmo[currentWeapon] = ammo;
+            const og = WEAPONS[currentWeapon].group;
+            og.visible = false; og.position.set(0, 0, 0); og.rotation.x = 0;
+            currentWeapon = name;
+            activeGun = WEAPONS[name].group;
+            activeGun.visible = true;
+            maxAmmo = WEAPONS[name].mag;
+            ammo = weaponAmmo[name];
+            gunRecoil = 0;
+            updateAmmoHUD();
+        }
+        updateAmmoHUD();
         let kills = 0;
         const totalTargets = 5;
 
@@ -1116,18 +1189,24 @@
             setTimeout(() => el.remove(), 800);
         }
 
-        renderer.domElement.addEventListener('click', () => {
+        renderer.domElement.addEventListener('mousedown', () => {
             if (!document.pointerLockElement) {
                 renderer.domElement.requestPointerLock();
                 return;
             }
-            if (Date.now() - lastShot < 150) return;
+            mouseDown = true;
+            if (!WEAPONS[currentWeapon].auto) fire(); // полуавтомат — выстрел на клик
+        });
+        renderer.domElement.addEventListener('mouseup', () => { mouseDown = false; });
+
+        function fire() {
+            if (Date.now() - lastShot < WEAPONS[currentWeapon].fireRate) return;
             if (ammo <= 0 || reloading) return;
             lastShot = Date.now();
             ammo--;
-            document.getElementById('ammo').textContent = 'Патроны: ' + ammo + ' / 30';
+            updateAmmoHUD();
 
-            gunRecoil = 0.08;
+            gunRecoil = WEAPONS[currentWeapon].recoil;
             muzzleFlash.style.opacity = '1';
             setTimeout(() => muzzleFlash.style.opacity = '0', 60);
             playShootSound();
@@ -1159,7 +1238,7 @@
                 });
                 if (closest && closestDist < 1) {
                     const isHeadshot = hitPoint.y > closest.y + 0.3;
-                    const dmg = isHeadshot ? 50 : 25;
+                    const dmg = isHeadshot ? WEAPONS[currentWeapon].dmg * 2 : WEAPONS[currentWeapon].dmg;
                     closest.hp -= dmg;
                     playHitSound();
                     spawnDamageNumber(hitPoint.x, hitPoint.y + 0.3, hitPoint.z, dmg, isHeadshot);
@@ -1176,10 +1255,12 @@
                     }
                 }
             }
-        });
+        }
 
         document.addEventListener('keydown', e => {
-            if ((e.key === 'r' || e.key === 'к') && !reloading && ammo < 30) {
+            if (e.key === '1') switchWeapon('pistol');
+            if (e.key === '2') switchWeapon('smg');
+            if ((e.key === 'r' || e.key === 'к') && !reloading && ammo < maxAmmo) {
                 reloading = true;
                 reloadTimer = RELOAD_TIME;
                 playReloadSound();
@@ -1356,14 +1437,16 @@
                 }
             }
 
+            if (mouseDown && WEAPONS[currentWeapon].auto && document.pointerLockElement) fire(); // автоогонь SMG
+
             if (gunRecoil > 0 && !reloading) {
-                gunGroup.position.z += gunRecoil;
-                gunGroup.rotation.x = -gunRecoil * 2;
+                activeGun.position.z += gunRecoil;
+                activeGun.rotation.x = -gunRecoil * 2;
                 gunRecoil *= 0.7;
                 if (gunRecoil < 0.001) {
                     gunRecoil = 0;
-                    gunGroup.position.z = 0;
-                    gunGroup.rotation.x = 0;
+                    activeGun.position.z = 0;
+                    activeGun.rotation.x = 0;
                 }
             }
 
@@ -1377,8 +1460,8 @@
 
                 if (progress < 0.15) {
                     const t = progress / 0.15;
-                    gunGroup.rotation.x = -t * 0.5;
-                    gunGroup.position.y = -t * 0.04;
+                    activeGun.rotation.x = -t * 0.5;
+                    activeGun.position.y = -t * 0.04;
                 } else if (progress < 0.45) {
                     const t = (progress - 0.15) / 0.3;
                     gunParts.magazine.position.y = -0.40 - t * 0.14;
@@ -1395,18 +1478,18 @@
                     gunParts.slideMain.position.z = -0.22 + (1 - t) * 0.08;
                 } else {
                     const t = (progress - 0.85) / 0.15;
-                    gunGroup.rotation.x = -0.5 * (1 - t);
-                    gunGroup.position.y = -0.04 * (1 - t);
+                    activeGun.rotation.x = -0.5 * (1 - t);
+                    activeGun.position.y = -0.04 * (1 - t);
                 }
 
                 if (reloadTimer <= 0) {
                     reloading = false;
-                    ammo = 30;
-                    document.getElementById('ammo').textContent = 'Патроны: 30 / 30';
+                    ammo = maxAmmo;
+                    updateAmmoHUD();
                     document.getElementById('reload-bar').style.display = 'none';
                     document.getElementById('reload-fill').style.width = '0%';
-                    gunGroup.rotation.x = 0;
-                    gunGroup.position.y = 0;
+                    activeGun.rotation.x = 0;
+                    activeGun.position.y = 0;
                     gunParts.magazine.position.y = -0.40;
                     gunParts.magBase.position.y = -0.475;
                     gunParts.slideMain.position.z = -0.30;
