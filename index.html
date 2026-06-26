@@ -419,16 +419,19 @@
         function addDoor(x, z, ry, w) {
             w = w || 1.4;
             const dh = 2.8;
+            const pivot = new THREE.Group();
+            pivot.position.set(x, 0, z);
+            pivot.rotation.y = ry || 0;
+            scene.add(pivot);
             const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, dh, 0.12), doorMat);
-            mesh.position.set(x, dh / 2, z);
-            mesh.rotation.y = ry || 0;
+            mesh.position.set(w / 2, dh / 2, 0);
             mesh.castShadow = true;
-            scene.add(mesh);
+            pivot.add(mesh);
             const hMat = new THREE.MeshPhongMaterial({ color: 0xbbaa44, specular: 0xffd700, shininess: 120 });
             const handle = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.08, 0.08), hMat);
-            handle.position.set(0.5, 0, 0.07);
+            handle.position.set(w / 2 - 0.15, 0, 0.07);
             mesh.add(handle);
-            doors.push({ mesh, x, z, open: false, ry, w });
+            doors.push({ mesh, pivot, x, z, open: false, ry, w });
         }
 
         addDoor(-16, -9, 0, 2.0);
@@ -1292,7 +1295,7 @@
                     const dz = player.position.z - door.z;
                     if (Math.sqrt(dx * dx + dz * dz) < 2.5) {
                         door.open = !door.open;
-                        door.mesh.rotation.y = door.ry + (door.open ? Math.PI / 2 : 0);
+                        door.pivot.rotation.y = door.ry + (door.open ? Math.PI / 2 : 0);
                         interacted = true;
                         break;
                     }
