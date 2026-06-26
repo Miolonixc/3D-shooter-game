@@ -324,7 +324,7 @@
         }
 
         const W3 = (x, z, sx, sz, mat) => W(x, z, sx, sz, mat, 4);
-        const b = 0.5;
+        const b = 1.0;
 
         // === ГРАНИЦЫ ===
         W3(0, -35, 70, b, brickTex2);
@@ -1543,51 +1543,58 @@
             // === MINIMAP ===
             const mc = document.getElementById('minimap');
             const mx = mc.getContext('2d');
-            const mw = 200, mh = 200, scale = 2.5, ox = mw/2, oz = mh/2;
-            mx.fillStyle = '#1a1a2e';
+            const mw = 200, mh = 200, sc = 2.2;
+            mx.fillStyle = '#111';
             mx.fillRect(0, 0, mw, mh);
-            mx.fillStyle = '#2a2a3a';
-            mx.fillRect(ox - 35*scale, oz - 35*scale, 70*scale, 70*scale);
 
-            mx.fillStyle = '#5a5a6a';
+            const cx = mw / 2 - player.position.x * sc;
+            const cz = mh / 2 - player.position.z * sc;
+
+            mx.fillStyle = '#1a1a2e';
+            mx.fillRect(cx - 35 * sc, cz - 35 * sc, 70 * sc, 70 * sc);
+
             for (const wall of walls) {
                 const g = wall.geometry;
                 const wp = wall.position;
-                const sx = g.parameters.width * scale;
-                const sz = g.parameters.depth * scale;
-                const rx = ox + wp.x * scale;
-                const rz = oz + wp.z * scale;
-                mx.fillRect(rx - sx/2, rz - sz/2, sx, sz);
+                const sw = g.parameters.width * sc;
+                const sd = g.parameters.depth * sc;
+                const wx = cx + wp.x * sc;
+                const wz = cz + wp.z * sc;
+                mx.fillStyle = '#6a6a7a';
+                mx.fillRect(wx - Math.max(sw, 2) / 2, wz - Math.max(sd, 2) / 2, Math.max(sw, 2), Math.max(sd, 2));
             }
 
             for (const door of doors) {
-                const rx = ox + door.x * scale;
-                const rz = oz + door.z * scale;
-                mx.fillStyle = door.open ? '#0f0' : '#f00';
-                mx.fillRect(rx - 3, rz - 3, 6, 6);
+                const dx = cx + door.x * sc;
+                const dz = cz + door.z * sc;
+                mx.fillStyle = door.open ? '#0f0' : '#f44';
+                mx.fillRect(dx - 4, dz - 4, 8, 8);
+                mx.fillStyle = '#fff';
+                mx.font = '7px Arial';
+                mx.fillText(door.open ? 'O' : 'X', dx - 2, dz + 3);
             }
 
             for (const box of boxes) {
                 if (box.type !== 'low') continue;
                 const g = box.mesh.geometry;
-                const sx = g.parameters.width * scale;
-                const sz = g.parameters.depth * scale;
-                mx.fillStyle = 'rgba(100,100,150,0.5)';
-                mx.fillRect(ox + box.x*scale - sx/2, oz + box.z*scale - sz/2, sx, sz);
+                const sw = g.parameters.width * sc;
+                const sd = g.parameters.depth * sc;
+                mx.fillStyle = 'rgba(80,80,120,0.4)';
+                mx.fillRect(cx + box.x * sc - sw / 2, cz + box.z * sc - sd / 2, sw, sd);
             }
 
-            const ppx = ox + player.position.x * scale;
-            const ppz = oz + player.position.z * scale;
+            const ppx = cx + player.position.x * sc;
+            const ppz = cz + player.position.z * sc;
             mx.fillStyle = '#0f0';
             mx.beginPath();
-            mx.arc(ppx, ppz, 3, 0, Math.PI * 2);
+            mx.arc(ppx, ppz, 4, 0, Math.PI * 2);
             mx.fill();
 
             mx.strokeStyle = '#ff0';
-            mx.lineWidth = 1;
+            mx.lineWidth = 2;
             mx.beginPath();
             mx.moveTo(ppx, ppz);
-            mx.lineTo(ppx + Math.sin(yaw) * 8, ppz + Math.cos(yaw) * 8);
+            mx.lineTo(ppx + Math.sin(yaw) * 10, ppz + Math.cos(yaw) * 10);
             mx.stroke();
         }
 
