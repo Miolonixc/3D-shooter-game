@@ -205,6 +205,8 @@
         player.castShadow = true;
         scene.add(player);
 
+        let crouchH = 0.6;
+
         const groundGeo = new THREE.PlaneGeometry(120, 120);
         const groundCanvas = document.createElement('canvas');
         groundCanvas.width = 512; groundCanvas.height = 512;
@@ -335,9 +337,9 @@
         W3(-35, 0, b, 70, brickTex2);
         W3(35, 0, b, 70, brickTex2);
 
-        // === ЗДАНИЕ A: x:-25..-7, z:-9..9 (проём 2.5) ===
-        W3(-21.125, -9, 7.75, b, brickTex);
-        W3(-10.875, -9, 7.75, b, brickTex);
+        // === ЗДАНИЕ A: x:-25..-7, z:-9..9 ===
+        W3(-21, -9, 8, b, brickTex);
+        W3(-11, -9, 8, b, brickTex);
         W3(-16, 9, 18, b, brickTex);
         W(-25, 0, b, 18, brickTex, 4);
         W(-7, -5, b, 8, brickTex, 4);
@@ -352,8 +354,8 @@
         W(25, 0, b, 18, brickTex2, 4);
 
         // === ЗДАНИЕ C: x:-25..-7, z:-25..-17 ===
-        W3(-21.125, -17, 7.75, b, brickTex);
-        W3(-10.875, -17, 7.75, b, brickTex);
+        W3(-21, -17, 8, b, brickTex);
+        W3(-11, -17, 8, b, brickTex);
         W3(-16, -25, 18, b, brickTex);
         W(-25, -21, b, 8, brickTex, 4);
         W(-7, -21, b, 8, brickTex, 4);
@@ -366,8 +368,8 @@
         W(25, -21, b, 8, brickTex2, 4);
 
         // === СКЛАД: x:-8..8, z:17..27 ===
-        W(-5.25, 17, 5.5, b, brickTex, 5);
-        W(5.25, 17, 5.5, b, brickTex, 5);
+        W(-5, 17, 6, b, brickTex, 5);
+        W(5, 17, 6, b, brickTex, 5);
         W(0, 27, 16, b, brickTex, 5);
         W(-8, 22, b, 10, brickTex, 5);
         W(8, 22, b, 10, brickTex, 5);
@@ -1387,12 +1389,14 @@
                 if (keys['d'] || keys['в'] || keys['arrowright']) { dx += Math.cos(yaw); dz -= Math.sin(yaw); }
 
                 if (keys[' '] && onGround) {
-                    velocityY = jumpForce;
+                    velocityY = crouching ? jumpForce * 0.6 : jumpForce;
                     onGround = false;
                 }
 
                 velocityY += gravity;
                 player.position.y += velocityY;
+
+                crouchH += ((crouching ? 0.2 : 0.6) - crouchH) * 0.2;
 
                 const feetY = player.position.y - 0.6;
                 const groundHeight = getGroundHeight(player.position.x, player.position.z);
@@ -1421,7 +1425,7 @@
                 }
 
                 camera.position.copy(player.position);
-                camera.position.y += crouching ? 0.2 : 0.6;
+                camera.position.y += crouchH;
                 camera.rotation.order = 'YXZ';
                 camera.rotation.y = yaw;
                 camera.rotation.x = pitch;
