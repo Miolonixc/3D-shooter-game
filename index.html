@@ -351,8 +351,8 @@
         W(25, -21, b, 8, brickTex2, 4);
 
         // === СКЛАД: x:-8..8, z:17..27 ===
-        W(-4.5, 17, 7, b, brickTex, 5);
-        W(4.5, 17, 7, b, brickTex, 5);
+        W(-5.25, 17, 5.5, b, brickTex, 5);
+        W(5.25, 17, 5.5, b, brickTex, 5);
         W(0, 27, 16, b, brickTex, 5);
         W(-8, 22, b, 10, brickTex, 5);
         W(8, 22, b, 10, brickTex, 5);
@@ -527,6 +527,7 @@
          [-5, 0.7, -13],[5, 0.7, -13],[-5, 0.7, 13],[5, 0.7, 13]].forEach(([x, y, z]) => {
             const c = new THREE.Mesh(collectibleGeo, collectibleMat.clone());
             c.position.set(x, y, z); c.castShadow = true;
+            c.userData.baseY = y;
             scene.add(c); collectibles.push(c);
         });
         document.getElementById('total').textContent = collectibles.length;
@@ -1033,11 +1034,11 @@
 
         const targets = [];
         const targetPositions = [
-            { x: 28, z: 6, h: 1.5 },
-            { x: 30, z: 6, h: 1.5 },
-            { x: 32, z: 6, h: 1.5 },
-            { x: 29, z: 6, h: 2.8 },
-            { x: 31, z: 6, h: 2.8 },
+            { x: 28, z: 8, h: 1.5 },
+            { x: 30, z: 8, h: 1.5 },
+            { x: 32, z: 8, h: 1.5 },
+            { x: 29, z: 8, h: 2.8 },
+            { x: 31, z: 8, h: 2.8 },
         ];
 
         targetPositions.forEach(tp => {
@@ -1317,7 +1318,7 @@
                     const dz = newZ - door.z;
                     const lx = dx * cos + dz * sin;
                     const lz = -dx * sin + dz * cos;
-                    if (Math.abs(lx) < door.w / 2 + r && Math.abs(lz) < b / 2 + r) {
+                    if (Math.abs(lx) < door.w / 2 + r && Math.abs(lz) < 0.12 + r) {
                         return true;
                     }
                 }
@@ -1342,8 +1343,10 @@
         function getGroundHeight(px, pz) {
             for (const box of boxes) {
                 if (box.type !== 'low') continue;
-                const hw = 0.75;
-                if (px > box.x - hw && px < box.x + hw && pz > box.z - hw && pz < box.z + hw) {
+                const geo = box.mesh.geometry;
+                const hw = geo.parameters.width / 2;
+                const hd = geo.parameters.depth / 2;
+                if (px > box.x - hw && px < box.x + hw && pz > box.z - hd && pz < box.z + hd) {
                     return box.h;
                 }
             }
@@ -1406,7 +1409,7 @@
                     const c = collectibles[i];
                     c.rotation.y += 0.03;
                     c.rotation.x += 0.01;
-                    c.position.y = 0.5 + Math.sin(Date.now() * 0.003 + i) * 0.15;
+                    c.position.y = c.userData.baseY + Math.sin(Date.now() * 0.003 + i) * 0.15;
 
                     const dx = player.position.x - c.position.x;
                     const dz = player.position.z - c.position.z;
