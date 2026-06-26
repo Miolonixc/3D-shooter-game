@@ -171,7 +171,7 @@
     <div id="interact"></div>
     <div id="message"></div>
     <canvas id="minimap" width="200" height="200"></canvas>
-    <div id="controls">WASD / Стрелки — движение | Мышь — поворот | Пробел — прыжок | ЛКМ — стрелять | R — перезарядка | 1/2 — оружие | E — действие</div>
+    <div id="controls">WASD / Стрелки — движение | Мышь — поворот | Пробел — прыжок | Ctrl — присесть | ЛКМ — стрелять | R — перезарядка | 1/2 — оружие | E — действие</div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
         const scene = new THREE.Scene();
@@ -435,9 +435,7 @@
         }
 
         addDoor(-16, -9, 0, 2.0);
-        addDoor(-7, 0, Math.PI / 2, 2.0);
         addDoor(16, -9, 0, 2.0);
-        addDoor(7, 0, Math.PI / 2, 2.0);
         addDoor(-16, -17, 0, 2.0);
         addDoor(16, -17, 0, 2.0);
         addDoor(0, 17, 0, 2.5);
@@ -1101,6 +1099,7 @@
         let gameWon = false;
         let velocityY = 0;
         let onGround = true;
+        let crouching = false;
         const gravity = -0.015;
         const jumpForce = 0.25;
         const groundY = 0.6;
@@ -1189,7 +1188,10 @@
             src.start();
         }
 
-        document.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+        document.addEventListener('keydown', e => {
+            keys[e.key.toLowerCase()] = true;
+            if (e.key === 'Control') e.preventDefault();
+        });
         document.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
         document.addEventListener('mousemove', e => {
@@ -1375,7 +1377,8 @@
             requestAnimationFrame(animate);
 
             if (!gameWon) {
-                const speed = 0.12;
+                crouching = !!keys['control'];
+                const speed = crouching ? 0.06 : 0.12;
                 let dx = 0, dz = 0;
 
                 if (keys['w'] || keys['ц'] || keys['arrowup']) { dx -= Math.sin(yaw); dz -= Math.cos(yaw); }
@@ -1418,7 +1421,7 @@
                 }
 
                 camera.position.copy(player.position);
-                camera.position.y += 0.6;
+                camera.position.y += crouching ? 0.2 : 0.6;
                 camera.rotation.order = 'YXZ';
                 camera.rotation.y = yaw;
                 camera.rotation.x = pitch;
@@ -1600,7 +1603,7 @@
             mx.lineWidth = 2;
             mx.beginPath();
             mx.moveTo(ppx, ppz);
-            mx.lineTo(ppx + Math.sin(yaw) * 10, ppz - Math.cos(yaw) * 10);
+            mx.lineTo(ppx - Math.sin(yaw) * 10, ppz + Math.cos(yaw) * 10);
             mx.stroke();
         }
 
