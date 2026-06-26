@@ -133,6 +133,17 @@
             opacity: 0;
             transition: opacity 0.05s;
         }
+        #minimap {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            width: 200px;
+            height: 200px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 4px;
+            background: rgba(0,0,0,0.6);
+            pointer-events: none;
+        }
         #interact {
             position: absolute;
             bottom: 15%;
@@ -159,6 +170,7 @@
     <div id="reload-bar"><div id="reload-fill"></div></div>
     <div id="interact"></div>
     <div id="message"></div>
+    <canvas id="minimap" width="200" height="200"></canvas>
     <div id="controls">WASD / Стрелки — движение | Мышь — поворот | Пробел — прыжок | ЛКМ — стрелять | R — перезарядка | 1/2 — оружие | E — действие</div>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script>
@@ -312,7 +324,7 @@
         }
 
         const W3 = (x, z, sx, sz, mat) => W(x, z, sx, sz, mat, 4);
-        const b = 1.0;
+        const b = 0.5;
 
         // === ГРАНИЦЫ ===
         W3(0, -35, 70, b, brickTex2);
@@ -1527,6 +1539,56 @@
             interactEl.textContent = showInteract;
 
             renderer.render(scene, camera);
+
+            // === MINIMAP ===
+            const mc = document.getElementById('minimap');
+            const mx = mc.getContext('2d');
+            const mw = 200, mh = 200, scale = 2.5, ox = mw/2, oz = mh/2;
+            mx.fillStyle = '#1a1a2e';
+            mx.fillRect(0, 0, mw, mh);
+            mx.fillStyle = '#2a2a3a';
+            mx.fillRect(ox - 35*scale, oz - 35*scale, 70*scale, 70*scale);
+
+            mx.fillStyle = '#5a5a6a';
+            for (const wall of walls) {
+                const g = wall.geometry;
+                const wp = wall.position;
+                const sx = g.parameters.width * scale;
+                const sz = g.parameters.depth * scale;
+                const rx = ox + wp.x * scale;
+                const rz = oz + wp.z * scale;
+                mx.fillRect(rx - sx/2, rz - sz/2, sx, sz);
+            }
+
+            for (const door of doors) {
+                const rx = ox + door.x * scale;
+                const rz = oz + door.z * scale;
+                mx.fillStyle = door.open ? '#0f0' : '#f00';
+                mx.fillRect(rx - 3, rz - 3, 6, 6);
+            }
+
+            for (const box of boxes) {
+                if (box.type !== 'low') continue;
+                const g = box.mesh.geometry;
+                const sx = g.parameters.width * scale;
+                const sz = g.parameters.depth * scale;
+                mx.fillStyle = 'rgba(100,100,150,0.5)';
+                mx.fillRect(ox + box.x*scale - sx/2, oz + box.z*scale - sz/2, sx, sz);
+            }
+
+            const ppx = ox + player.position.x * scale;
+            const ppz = oz + player.position.z * scale;
+            mx.fillStyle = '#0f0';
+            mx.beginPath();
+            mx.arc(ppx, ppz, 3, 0, Math.PI * 2);
+            mx.fill();
+
+            mx.strokeStyle = '#ff0';
+            mx.lineWidth = 1;
+            mx.beginPath();
+            mx.moveTo(ppx, ppz);
+            mx.lineTo(ppx + Math.sin(yaw) * 8, ppz + Math.cos(yaw) * 8);
+            mx.stroke();
         }
 
         window.addEventListener('resize', () => {
