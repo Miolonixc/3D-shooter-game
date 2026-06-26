@@ -226,7 +226,7 @@
         const groundTex = new THREE.CanvasTexture(groundCanvas);
         groundTex.wrapS = groundTex.wrapT = THREE.RepeatWrapping;
         groundTex.repeat.set(8, 8);
-        const groundMat = new THREE.MeshPhongMaterial({ map: groundTex });
+        const groundMat = new THREE.MeshLambertMaterial({ map: groundTex });
         const ground = new THREE.Mesh(groundGeo, groundMat);
         ground.rotation.x = -Math.PI / 2;
         ground.receiveShadow = true;
@@ -247,7 +247,8 @@
                     cx.fillRect(bx + 1, by + 1, 30, 14);
                 }
             }
-            return new THREE.CanvasTexture(c);
+            const tex = new THREE.CanvasTexture(c);
+            return new THREE.MeshLambertMaterial({ map: tex });
         }
 
         function makeConcreteTex() {
@@ -261,7 +262,8 @@
                 cx.fillStyle = `rgba(${136+v},${136+v},${136+v},0.3)`;
                 cx.fillRect(Math.random()*256, Math.random()*256, Math.random()*4+1, Math.random()*2+1);
             }
-            return new THREE.CanvasTexture(c);
+            const tex = new THREE.CanvasTexture(c);
+            return new THREE.MeshLambertMaterial({ map: tex });
         }
 
         function makeWoodTex() {
@@ -275,7 +277,8 @@
                 cx.fillStyle = `rgb(${107+v},${66+v},${38+v})`;
                 cx.fillRect(0, y, 128, 1);
             }
-            return new THREE.CanvasTexture(c);
+            const tex = new THREE.CanvasTexture(c);
+            return new THREE.MeshLambertMaterial({ map: tex });
         }
 
         const brickTex = makeBrickTex(140, 80, 60);
@@ -403,7 +406,7 @@
             t.repeat.set(4, 4);
             return t;
         })();
-        const roofMat = new THREE.MeshPhongMaterial({ map: roofTex });
+        const roofMat = new THREE.MeshLambertMaterial({ map: roofTex });
 
         PLATFORM(-17, 0, 20, 18, 3.55, roofMat);
         PLATFORM(17, 0, 20, 18, 3.55, roofMat);
@@ -411,7 +414,7 @@
         PLATFORM(17, -21, 20, 8, 3.55, roofMat);
 
         // === ДВЕРИ ===
-        const doorMat = new THREE.MeshPhongMaterial({ map: woodTex });
+        const doorMat = woodTex;
         const doors = [];
         function addDoor(x, z, ry, w) {
             w = w || 1.4;
@@ -488,7 +491,7 @@
         }
 
         function addBench(x, z) {
-            const sm = new THREE.MeshPhongMaterial({ map: woodTex });
+            const sm = woodTex;
             const s = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.06, 0.4), sm);
             s.position.set(x, 0.45, z); s.castShadow = true; scene.add(s);
             const bk = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.4, 0.04), sm);
@@ -561,7 +564,7 @@
             t.repeat.set(3, 3);
             return t;
         })();
-        const floorTileMat = new THREE.MeshPhongMaterial({ map: floorTileTex });
+        const floorTileMat = new THREE.MeshLambertMaterial({ map: floorTileTex });
 
         FLOOR(-16, 0, 18, 18, 0.02, floorTileMat);
         FLOOR(16, 0, 18, 18, 0.02, floorTileMat);
