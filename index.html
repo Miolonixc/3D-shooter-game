@@ -1547,26 +1547,27 @@
             mx.fillStyle = '#111';
             mx.fillRect(0, 0, mw, mh);
 
-            const cx = mw / 2 - player.position.x * sc;
-            const cz = mh / 2 - player.position.z * sc;
+            mx.save();
+            mx.translate(mw / 2, mh / 2);
+            mx.rotate(-yaw);
 
             mx.fillStyle = '#1a1a2e';
-            mx.fillRect(cx - 35 * sc, cz - 35 * sc, 70 * sc, 70 * sc);
+            mx.fillRect(-35 * sc, -35 * sc, 70 * sc, 70 * sc);
 
             for (const wall of walls) {
                 const g = wall.geometry;
                 const wp = wall.position;
                 const sw = g.parameters.width * sc;
                 const sd = g.parameters.depth * sc;
-                const wx = cx + wp.x * sc;
-                const wz = cz + wp.z * sc;
+                const wx = (wp.x - player.position.x) * sc;
+                const wz = (wp.z - player.position.z) * sc;
                 mx.fillStyle = '#6a6a7a';
                 mx.fillRect(wx - Math.max(sw, 2) / 2, wz - Math.max(sd, 2) / 2, Math.max(sw, 2), Math.max(sd, 2));
             }
 
             for (const door of doors) {
-                const dx = cx + door.x * sc;
-                const dz = cz + door.z * sc;
+                const dx = (door.x - player.position.x) * sc;
+                const dz = (door.z - player.position.z) * sc;
                 mx.fillStyle = door.open ? '#0f0' : '#f44';
                 mx.fillRect(dx - 4, dz - 4, 8, 8);
                 mx.fillStyle = '#fff';
@@ -1580,22 +1581,22 @@
                 const sw = g.parameters.width * sc;
                 const sd = g.parameters.depth * sc;
                 mx.fillStyle = 'rgba(80,80,120,0.4)';
-                mx.fillRect(cx + box.x * sc - sw / 2, cz + box.z * sc - sd / 2, sw, sd);
+                mx.fillRect((box.x - player.position.x) * sc - sw / 2, (box.z - player.position.z) * sc - sd / 2, sw, sd);
             }
 
-            const ppx = cx + player.position.x * sc;
-            const ppz = cz + player.position.z * sc;
             mx.fillStyle = '#0f0';
             mx.beginPath();
-            mx.arc(ppx, ppz, 4, 0, Math.PI * 2);
+            mx.arc(0, 0, 4, 0, Math.PI * 2);
             mx.fill();
 
             mx.strokeStyle = '#ff0';
             mx.lineWidth = 2;
             mx.beginPath();
-            mx.moveTo(ppx, ppz);
-            mx.lineTo(ppx + Math.sin(yaw) * 10, ppz + Math.cos(yaw) * 10);
+            mx.moveTo(0, 0);
+            mx.lineTo(0, -10);
             mx.stroke();
+
+            mx.restore();
         }
 
         window.addEventListener('resize', () => {
