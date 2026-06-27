@@ -382,8 +382,15 @@ function fire() {
 }
 
 // --- ввод ---
-overlay.addEventListener('click', () => { audio().resume(); canvas.requestPointerLock(); });
+const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+let touchStarted = false;
+overlay.addEventListener('click', () => {
+  audio().resume();
+  if (isTouch) { touchStarted = true; overlay.style.display = 'none'; }
+  else canvas.requestPointerLock();
+});
 document.addEventListener('pointerlockchange', () => {
+  if (isTouch) return;
   overlay.style.display = document.pointerLockElement === canvas ? 'none' : 'flex';
 });
 const locked = () => document.pointerLockElement === canvas;
@@ -406,6 +413,61 @@ window.addEventListener('keydown', (e) => {
   if (k === 'r' || k === 'к') reload();
   if (k === 'e' || k === 'у') toggleNearestDoor();
 });
+
+// --- сенсорное управление (телефон) ---
+// touchMove на уровне модуля — render-loop двигает камеру через cameraDirection.
+const touchMove = { x: 0, y: 0 };
+if (isTouch) {
+  const css = (el: HTMLElement, s: Record<string, string>) => Object.assign(el.style, s as any);
+  const mk = (s: Record<string, string>) => { const d = document.createElement('div'); css(d, s); document.body.appendChild(d); return d; };
+  // визуальный джойстик (появляется под пальцем)
+  const stickZone = mk({ position: 'fixed', width: '100px', height: '100px', borderRadius: '50%', border: '2px solid rgba(255,255,255,.4)', background: 'rgba(255,255,255,.08)', display: 'none', pointerEvents: 'none', zIndex: '8' });
+  const stickNub = mk({ position: 'fixed', width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(255,255,255,.5)', display: 'none', pointerEvents: 'none', zIndex: '9' });
+  // кнопки действий
+  const btn = (label: string, right: string, bottom: string) => mk({ position: 'fixed', right, bottom, width: '64px', height: '64px', borderRadius: '50%', background: 'rgba(255,255,255,.14)', border: '2px solid rgba(255,255,255,.4)', color: '#fff', font: '600 13px system-ui', display: 'flex', alignItems: 'center', justifyContent: 'center', touchAction: 'none', zIndex: '9', userSelect: 'none' });
+  const fireBtn = btn('ОГОНЬ', '20px', '24px'); fireBtn.textContent = '🔫';
+  const jumpBtn = btn('', '96px', '24px'); jumpBtn.textContent = '⤒';
+  const swBtn = btn('', '20px', '100px'); swBtn.textContent = '1/2';
+
+  let moveId = -1, moveCX = 0, moveCY = 0, lookId = -1, lookX = 0, lookY = 0;
+  const MAXR = 50;
+  const start = () => { if (!touchStarted) { touchStarted = true; overlay.style.display = 'none'; audio().resume(); } };
+
+  canvas.addEventListener('pointerdown', (e) => {
+    start();
+    if (e.clientX < window.innerWidth * 0.5 && moveId < 0) {
+      moveId = e.pointerId; moveCX = e.clientX; moveCY = e.clientY;
+      css(stickZone, { left: (moveCX - 50) + 'px', top: (moveCY - 50) + 'px', display: 'block' });
+      css(stickNub, { left: (moveCX - 20) + 'px', top: (moveCY - 20) + 'px', display: 'block' });
+    } else if (lookId < 0) {
+      lookId = e.pointerId; lookX = e.clientX; lookY = e.clientY;
+    }
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (e.pointerId === moveId) {
+      const dx = e.clientX - moveCX, dy = e.clientY - moveCY;
+      const mag = Math.min(1, Math.hypot(dx, dy) / MAXR);
+      const ang = Math.atan2(dy, dx);
+      touchMove.x = Math.cos(ang) * mag; touchMove.y = -Math.sin(ang) * mag; // вперёд = палец вверх
+      css(stickNub, { left: (moveCX + Math.cos(ang) * mag * MAXR - 20) + 'px', top: (moveCY + Math.sin(ang) * mag * MAXR - 20) + 'px' });
+    } else if (e.pointerId === lookId) {
+      camera.rotation.y += (e.clientX - lookX) * 0.004;
+      camera.rotation.x = Math.max(-1.45, Math.min(1.45, camera.rotation.x + (e.clientY - lookY) * 0.004));
+      lookX = e.clientX; lookY = e.clientY;
+    }
+  });
+  const end = (e: PointerEvent) => {
+    if (e.pointerId === moveId) { moveId = -1; touchMove.x = 0; touchMove.y = 0; css(stickZone, { display: 'none' }); css(stickNub, { display: 'none' }); }
+    if (e.pointerId === lookId) lookId = -1;
+  };
+  canvas.addEventListener('pointerup', end);
+  canvas.addEventListener('pointercancel', end);
+
+  fireBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); start(); mouseDown = true; fire(); });
+  fireBtn.addEventListener('pointerup', () => { mouseDown = false; });
+  jumpBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); jumpQueued = true; });
+  swBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); switchWeapon(wi === 0 ? 1 : 0); });
+}
 
 // открыть/закрыть ближайшую дверь в радиусе досягаемости
 function toggleNearestDoor() {
@@ -445,6 +507,15 @@ scene.onBeforeRenderObservable.add(() => {
 
   // автоогонь (SMG): удержание ЛКМ
   if (mouseDown && cur.auto) fire();
+
+  // движение с джойстика (телефон): добавляем в cameraDirection — камера
+  // применит со встроенными коллизиями, как обычный WASD-ввод
+  if (touchMove.x || touchMove.y) {
+    const fwd = camera.getDirection(B.Vector3.Forward()); fwd.y = 0; fwd.normalize();
+    const right = camera.getDirection(B.Vector3.Right()); right.y = 0; right.normalize();
+    camera.cameraDirection.addInPlace(fwd.scale(touchMove.y * camera.speed));
+    camera.cameraDirection.addInPlace(right.scale(touchMove.x * camera.speed));
+  }
 
   // покачивание оружия при ходьбе + просадка при перезарядке + отдача
   const moved = Math.hypot(camera.position.x - lastX, camera.position.z - lastZ) > 0.004;
