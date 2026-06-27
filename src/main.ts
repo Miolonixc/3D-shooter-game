@@ -306,8 +306,9 @@ function buildAssaultMap(): B.Vector3 {
   ([[-8, 8, 1.4], [-6, 9.6, 1.4], [7, 7, 1.6], [9, 16, 1.4], [0, 20, 1.5], [-3, 22, 1.3], [6, 13, 1.2], [-6, -12, 1.4], [7, -16, 1.4]] as [number, number, number][])
     .forEach(([x, z, s]) => box('crate', x, s / 2, z, s, s, s, crateMat));
 
-  // мишени (T): на галерее + на полу
-  spawnTarget(-18, 6, galY); spawnTarget(-18, 22, galY); spawnTarget(18, 10, galY); spawnTarget(0, 26, galY);
+  // мишени (T): на галерее (на поверхности слэба) + на полу
+  const galTop = galY + 0.15;
+  spawnTarget(-18, 6, galTop); spawnTarget(-18, 22, galTop); spawnTarget(18, 10, galTop); spawnTarget(0, 26, galTop);
   spawnTarget(-8, 13); spawnTarget(8, 18); spawnTarget(0, 6);
   ([[-8, 20], [8, 8], [0, 14], [-12, 24]] as [number, number][]).forEach(([x, z]) => spawnPickup(x, z));
 
@@ -640,7 +641,8 @@ if (isTouch) {
 // Камера сама обрабатывает горизонтальные коллизии (WASD + checkCollisions).
 // Вертикаль считаем вручную: луч вниз ищет опору, position.y двигаем сами.
 let velY = 0;
-const GRAV = -0.013, JUMP = 0.23, EYE = 1.7;
+const GRAV = -0.013, JUMP = 0.23, EYE = 1.7, MOVE = 0.06; // MOVE — ускорение ходьбы (≈8 ед/с)
+const spawnPoint = new B.Vector3(0, EYE, -26);             // точка спавна текущей карты
 let bobPhase = 0, gunDip = 0, lastX = camera.position.x, lastZ = camera.position.z;
 scene.onBeforeRenderObservable.add(() => {
   const downRay = new B.Ray(camera.position, new B.Vector3(0, -1, 0), 60);
@@ -656,8 +658,8 @@ scene.onBeforeRenderObservable.add(() => {
     if (camera.position.y < standY) { camera.position.y = standY; velY = 0; }
   }
   jumpQueued = false;
-  // упал с карты — вернуть на спавн
-  if (camera.position.y < -8) { camera.position.set(0, EYE, -26); velY = 0; }
+  // упал с карты — вернуть на спавн текущей карты
+  if (camera.position.y < -8) { camera.position.copyFrom(spawnPoint); velY = 0; }
 
   // автоогонь (SMG): удержание ЛКМ
   if (mouseDown && cur.auto) fire();
@@ -669,11 +671,13 @@ scene.onBeforeRenderObservable.add(() => {
     inZ += (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0) - (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0);
     inX += (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0) - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0);
   }
-  if (inX || inZ) {
+  const inMag = Math.hypot(inX, inZ);
+  if (inMag > 0.001) {
+    if (inMag > 1) { inX /= inMag; inZ /= inMag; } // по диагонали не быстрее
     const fwd = camera.getDirection(B.Vector3.Forward()); fwd.y = 0; fwd.normalize();
     const right = camera.getDirection(B.Vector3.Right()); right.y = 0; right.normalize();
-    camera.cameraDirection.addInPlace(fwd.scale(inZ * camera.speed));
-    camera.cameraDirection.addInPlace(right.scale(inX * camera.speed));
+    camera.cameraDirection.addInPlace(fwd.scale(inZ * MOVE));
+    camera.cameraDirection.addInPlace(right.scale(inX * MOVE));
   }
 
   // покачивание оружия при ходьбе + просадка при перезарядке + отдача
@@ -747,6 +751,7 @@ function loadMap(i: number) {
   kills = 0; collected = 0; pickupTotal = pickups.length; reloading = false;
   hud(); objHud();
   // спавн + корректный мировой bbox (Babylon обновляет его лениво — иначе стрельба/опора мажут)
+  spawnPoint.copyFrom(spawn);
   camera.position.copyFrom(spawn);
   camera.rotation.set(0, 0, 0);
   velY = 0;
