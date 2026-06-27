@@ -69,6 +69,10 @@ function box(name: string, x: number, y: number, z: number, w: number, h: number
   return m;
 }
 
+// двери открываются на E; петля у левого края проёма, панель тянется вправо
+interface Door { hinge: B.TransformNode; panel: B.Mesh; open: boolean; }
+const doors: Door[] = [];
+
 function building(cx: number, cz: number, w: number, d: number, h: number, m: B.Material) {
   const t = 0.5;       // толщина стены
   const door = 2.6;    // ширина проёма
@@ -80,10 +84,16 @@ function building(cx: number, cz: number, w: number, d: number, h: number, m: B.
   box('w', cx - w / 2, h / 2, cz, t, h, d, m);              // левая
   box('w', cx + w / 2, h / 2, cz, t, h, d, m);              // правая
   box('roof', cx, h + 0.12, cz, w + 0.3, 0.25, d + 0.3, roofMat); // крыша
-  // дверь (визуальная, в проёме)
+  // дверь (открывается на E) — петля у левого края проёма
   const dh = Math.min(h - 0.4, 2.8);
-  const dr = box('door', cx, dh / 2, cz - d / 2, door - 0.15, dh, 0.14, doorMat);
-  dr.checkCollisions = false;
+  const dw = door - 0.15;
+  const hinge = new B.TransformNode('hinge', scene);
+  hinge.position.set(cx - dw / 2, dh / 2, cz - d / 2);
+  const dr = box('door', 0, 0, 0, dw, dh, 0.14, doorMat);
+  dr.parent = hinge;
+  dr.position.set(dw / 2, 0, 0);   // панель смещена вправо от петли
+  dr.checkCollisions = true;       // закрытая дверь блокирует проход
+  doors.push({ hinge, panel: dr, open: false });
 }
 
 building(-16, -6, 14, 12, 5, brickMat);
@@ -113,11 +123,34 @@ function spawnTarget(x: number, z: number) {
   const t = B.MeshBuilder.CreateBox('target', { width: 0.85, height: 1.7, depth: 0.4 }, scene);
   t.position.set(x, 0.85, z);
   t.material = targetMat.clone('target_' + targets.length)!; // своя копия — подсветка попадания не задевает остальных
-  t.metadata = { hp: 100 };
+  t.metadata = { hp: 100, x, z };                            // x/z — для респавна
+  t.computeWorldMatrix(true); t.refreshBoundingInfo();       // корректный мировой bbox (важно при респавне)
   targets.push(t);
 }
 ([[28, 8], [28, 3], [24, 8], [-28, 8], [-24, 3], [0, 33], [12, -20], [-12, -20]] as [number, number][])
   .forEach(([x, z]) => spawnTarget(x, z));
+
+// --- собираемые кубики ---
+const pickMat = mat('pickup', '#34d0c0', 0.2);
+pickMat.emissiveColor = new B.Color3(0.05, 0.36, 0.33);
+const pickups: B.Mesh[] = [];
+function spawnPickup(x: number, z: number) {
+  const c = B.MeshBuilder.CreateBox('pickup', { size: 0.5 }, scene);
+  c.position.set(x, 0.8, z);
+  c.material = pickMat;
+  c.checkCollisions = false; c.isPickable = false;
+  pickups.push(c);
+}
+([[8, -8], [-8, -8], [16, 18], [-16, 18], [0, 12], [20, -16]] as [number, number][])
+  .forEach(([x, z]) => spawnPickup(x, z));
+const pickupTotal = pickups.length;
+let collected = 0;
+const objEl = document.createElement('div');
+objEl.className = 'hud';
+Object.assign(objEl.style, { top: '40px', left: '16px', font: '600 15px system-ui', color: '#bdeff0' } as any);
+document.body.appendChild(objEl);
+function objHud() { objEl.textContent = '🧊 Собрано: ' + collected + ' / ' + pickupTotal; }
+objHud();
 
 // --- материалы оружия ---
 const bluedMat = mat('blued', '#15161b', 0.55);          // воронёная сталь
@@ -257,9 +290,11 @@ function fire() {
     hitMarker(headshot);
     dmgPopup(hit.pickedPoint, dmg, headshot);
     if (t.metadata.hp <= 0) {
+      const sx = t.metadata.x, sz = t.metadata.z;
       targets.splice(targets.indexOf(t), 1);
       t.dispose();
       kills++; hud();
+      setTimeout(() => spawnTarget(sx, sz), 4000); // респавн мишени через 4 c
     } else {
       const em = t.material as B.StandardMaterial;
       em.emissiveColor = new B.Color3(0.85, 0.12, 0.12);
@@ -291,7 +326,21 @@ window.addEventListener('keydown', (e) => {
   if (k === '1') switchWeapon(0);
   if (k === '2') switchWeapon(1);
   if (k === 'r' || k === 'к') reload();
+  if (k === 'e' || k === 'у') toggleNearestDoor();
 });
+
+// открыть/закрыть ближайшую дверь в радиусе досягаемости
+function toggleNearestDoor() {
+  let nearest: Door | null = null, best = 3.4;
+  for (const dr of doors) {
+    const dist = B.Vector3.Distance(camera.position, dr.hinge.getAbsolutePosition());
+    if (dist < best) { best = dist; nearest = dr; }
+  }
+  if (nearest) {
+    nearest.open = !nearest.open;
+    nearest.panel.checkCollisions = !nearest.open; // открытая дверь не блокирует
+  }
+}
 
 // --- вертикаль (гравитация + прыжок) ---
 // Камера сама обрабатывает горизонтальные коллизии (WASD + checkCollisions).
@@ -322,6 +371,23 @@ scene.onBeforeRenderObservable.add(() => {
   if (recoil > 0.001) { recoil *= 0.8; } else recoil = 0;
   cur.node.position.z = gunHome.z - recoil;
   cur.node.rotation.x = recoil * 1.5;
+
+  // двери: плавный доворот к целевому углу
+  for (const dr of doors) {
+    const tgt = dr.open ? -Math.PI / 2 : 0;
+    dr.hinge.rotation.y += (tgt - dr.hinge.rotation.y) * 0.18;
+  }
+
+  // кубики: вращение, парение, подбор при касании
+  const tms = performance.now();
+  for (let i = pickups.length - 1; i >= 0; i--) {
+    const c = pickups[i];
+    c.rotation.y += 0.04; c.rotation.x += 0.02;
+    c.position.y = 0.8 + Math.sin(tms / 400 + i) * 0.12;
+    if (B.Vector3.Distance(camera.position, c.position) < 1.5) {
+      c.dispose(); pickups.splice(i, 1); collected++; objHud();
+    }
+  }
 });
 
 // Babylon обновляет мировой bounding box лениво — у статичных мешей,
