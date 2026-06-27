@@ -145,7 +145,9 @@ const doors: Door[] = [];
 // следы построек (для миникарты)
 const footprints: { cx: number; cz: number; w: number; d: number }[] = [];
 
-function building(cx: number, cz: number, w: number, d: number, h: number, m: B.Material) {
+// openSide: 'east'|'west' — боковая стена без коллизии (для захода с моста на крышу),
+// openBack: задняя стена без коллизии. Стены остаются видимыми.
+function building(cx: number, cz: number, w: number, d: number, h: number, m: B.Material, openSide: 'none' | 'east' | 'west' = 'none', openBack = false) {
   footprints.push({ cx, cz, w, d });
   const t = 0.5;       // толщина стены
   const door = 2.6;    // ширина проёма
@@ -153,9 +155,12 @@ function building(cx: number, cz: number, w: number, d: number, h: number, m: B.
   // передняя стена (z = cz - d/2) — два сегмента вокруг двери
   box('w', cx - (door / 2 + seg / 2), h / 2, cz - d / 2, seg, h, t, m);
   box('w', cx + (door / 2 + seg / 2), h / 2, cz - d / 2, seg, h, t, m);
-  box('w', cx, h / 2, cz + d / 2, w, h, t, m);              // задняя
-  box('w', cx - w / 2, h / 2, cz, t, h, d, m);              // левая
-  box('w', cx + w / 2, h / 2, cz, t, h, d, m);              // правая
+  const back = box('w', cx, h / 2, cz + d / 2, w, h, t, m);   // задняя
+  const wWest = box('w', cx - w / 2, h / 2, cz, t, h, d, m);  // левая (west)
+  const wEast = box('w', cx + w / 2, h / 2, cz, t, h, d, m);  // правая (east)
+  if (openBack) back.checkCollisions = false;
+  if (openSide === 'west') wWest.checkCollisions = false;
+  if (openSide === 'east') wEast.checkCollisions = false;
   const roof = box('roof', cx, h + 0.12, cz, w + 0.3, 0.25, d + 0.3, roofMat); // крыша
   roof.checkCollisions = false;       // не потолок-препятствие
   roof.metadata = { floor: true };    // по крыше можно ходить (через мост)
@@ -228,8 +233,9 @@ function spawnPickup(x: number, z: number, baseY = 0) {
 function buildCityMap(): B.Vector3 {
   const ground = B.MeshBuilder.CreateGround('ground', { width: 220, height: 220 }, scene);
   ground.material = groundMat; ground.checkCollisions = true; ground.receiveShadows = true; reg(ground);
-  building(-16, -6, 14, 12, 5, brickMat);
-  building(16, -6, 14, 12, 5, brick2Mat);
+  // передние два здания — с заходом на крышу по мосту (боковая+задняя стена без коллизии)
+  building(-16, -6, 14, 12, 5, brickMat, 'east', true);
+  building(16, -6, 14, 12, 5, brick2Mat, 'west', true);
   building(-16, 12, 14, 10, 6, brickMat);
   building(16, 12, 14, 10, 6, brick2Mat);
   building(0, 26, 18, 12, 7, brickMat);
