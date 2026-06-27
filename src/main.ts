@@ -219,6 +219,7 @@ function spawnPickup(x: number, z: number, baseY = 0) {
   c.position.set(x, baseY + 0.8, z);
   c.material = pickMat;
   c.checkCollisions = false; c.isPickable = false;
+  c.metadata = { baseY };
   pickups.push(c);
 }
 
@@ -246,7 +247,8 @@ function buildCityMap(): B.Vector3 {
   ramp('ramp', 0, 1.75, -5, 4, 6.6, 3.5, 5.4, concreteMat);
   ([[28, 8], [28, 3], [24, 8], [-28, 8], [-24, 3], [0, 33], [12, -20], [-12, -20]] as [number, number][])
     .forEach(([x, z]) => spawnTarget(x, z));
-  ([[8, -8], [-8, -8], [16, 18], [-16, 18], [0, 12], [20, -16]] as [number, number][])
+  // кубики — в открытых местах, подальше от стен (иначе не подобрать)
+  ([[8, -8], [-8, -8], [28, 12], [-28, 12], [0, 12], [28, -8]] as [number, number][])
     .forEach(([x, z]) => spawnPickup(x, z));
   return new B.Vector3(0, 1.7, -26);
 }
@@ -310,7 +312,7 @@ function buildAssaultMap(): B.Vector3 {
   const galTop = galY + 0.15;
   spawnTarget(-18, 6, galTop); spawnTarget(-18, 22, galTop); spawnTarget(18, 10, galTop); spawnTarget(0, 26, galTop);
   spawnTarget(-8, 13); spawnTarget(8, 18); spawnTarget(0, 6);
-  ([[-8, 20], [8, 8], [0, 14], [-12, 24]] as [number, number][]).forEach(([x, z]) => spawnPickup(x, z));
+  ([[-8, 20], [11, 10], [0, 14], [-12, 24]] as [number, number][]).forEach(([x, z]) => spawnPickup(x, z));
 
   return new B.Vector3(0, 1.7, -22); // CT спавн на улице у ворот A
 }
@@ -699,13 +701,13 @@ scene.onBeforeRenderObservable.add(() => {
     dr.hinge.rotation.y += (tgt - dr.hinge.rotation.y) * 0.18;
   }
 
-  // кубики: вращение, парение, подбор при касании
+  // кубики: вращение, парение, подбор при касании (по горизонтали — высота не мешает)
   const tms = performance.now();
   for (let i = pickups.length - 1; i >= 0; i--) {
     const c = pickups[i];
     c.rotation.y += 0.04; c.rotation.x += 0.02;
-    c.position.y = 0.8 + Math.sin(tms / 400 + i) * 0.12;
-    if (B.Vector3.Distance(camera.position, c.position) < 1.5) {
+    c.position.y = (c.metadata ? c.metadata.baseY : 0) + 0.8 + Math.sin(tms / 400 + i) * 0.12;
+    if (Math.hypot(camera.position.x - c.position.x, camera.position.z - c.position.z) < 1.8) {
       c.dispose(); pickups.splice(i, 1); collected++; objHud();
     }
   }
