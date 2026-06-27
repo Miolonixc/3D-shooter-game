@@ -53,6 +53,52 @@ const roofMat = mat('roof', '#5f636b');
 const doorMat = mat('door', '#7a4a28', 0.08);
 const concreteMat = mat('concrete', '#9a9a9e');
 
+// --- процедурные текстуры (DynamicTexture, без файлов) ---
+function shade(hex: string, f: number) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.min(255, ((n >> 16) & 255) * f) | 0;
+  const g = Math.min(255, ((n >> 8) & 255) * f) | 0;
+  const b = Math.min(255, (n & 255) * f) | 0;
+  return 'rgb(' + r + ',' + g + ',' + b + ')';
+}
+function brickTex(name: string, base: string, mortar: string) {
+  const dt = new B.DynamicTexture(name, { width: 256, height: 256 }, scene, false);
+  const ctx = dt.getContext() as any;
+  ctx.fillStyle = mortar; ctx.fillRect(0, 0, 256, 256);
+  const bw = 60, bh = 22, gap = 4;
+  let row = 0;
+  for (let y = 0; y < 256; y += bh + gap, row++) {
+    const off = row % 2 ? -bw / 2 : 0;
+    for (let x = off - bw; x < 256 + bw; x += bw + gap) {
+      ctx.fillStyle = shade(base, 0.82 + Math.random() * 0.32);
+      ctx.fillRect(x, y, bw, bh);
+    }
+  }
+  dt.update();
+  return dt;
+}
+function speckleTex(name: string, base: string, fleck: string) {
+  const dt = new B.DynamicTexture(name, { width: 256, height: 256 }, scene, false);
+  const ctx = dt.getContext() as any;
+  ctx.fillStyle = base; ctx.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 2600; i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? fleck : base;
+    ctx.fillRect(Math.random() * 256, Math.random() * 256, 2, 2);
+  }
+  dt.update();
+  return dt;
+}
+const white = () => new B.Color3(1, 1, 1);
+function applyTex(m: B.StandardMaterial, dt: B.DynamicTexture, scale: number) {
+  dt.uScale = scale; dt.vScale = scale;
+  m.diffuseTexture = dt;
+  m.diffuseColor = white(); // текстура несёт цвет — иначе двойное затемнение
+}
+applyTex(brickMat, brickTex('bt1', '#b06848', '#3d2a22'), 2);
+applyTex(brick2Mat, brickTex('bt2', '#8b979c', '#33383b'), 2);
+applyTex(groundMat, speckleTex('gt', '#777770', '#5a5a52'), 24);
+applyTex(concreteMat, speckleTex('ct', '#a2a2a6', '#82828a'), 3);
+
 // --- земля ---
 const ground = B.MeshBuilder.CreateGround('ground', { width: 220, height: 220 }, scene);
 ground.material = groundMat;
@@ -238,7 +284,7 @@ function switchWeapon(i: number) {
 
 function reload() {
   if (reloading || cur.ammo >= cur.mag) return;
-  reloading = true; hud();
+  reloading = true; hud(); sndReload();
   const w = cur;
   setTimeout(() => { w.ammo = w.mag; if (cur === w) { reloading = false; } hud(); }, cur.reloadMs);
 }
@@ -264,6 +310,36 @@ function dmgPopup(point: B.Vector3, dmg: number, head: boolean) {
   setTimeout(() => el.remove(), 640);
 }
 
+// --- звук (синтез через WebAudio, без файлов) ---
+let actx: AudioContext | null = null;
+function audio() {
+  if (!actx) actx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  return actx;
+}
+function blip(freq: number, dur: number, type: OscillatorType, vol: number, slideTo?: number) {
+  const a = audio(); const t = a.currentTime;
+  const o = a.createOscillator(); const g = a.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t);
+  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(a.destination); o.start(t); o.stop(t + dur);
+}
+function noiseBurst(dur: number, vol: number, cutoff: number) {
+  const a = audio(); const t = a.currentTime;
+  const n = Math.floor(a.sampleRate * dur);
+  const buf = a.createBuffer(1, n, a.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < n; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2);
+  const src = a.createBufferSource(); src.buffer = buf;
+  const g = a.createGain(); g.gain.value = vol;
+  const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = cutoff;
+  src.connect(f).connect(g).connect(a.destination); src.start(t);
+}
+function sndShoot(smg: boolean) { noiseBurst(smg ? 0.07 : 0.11, smg ? 0.16 : 0.26, smg ? 2200 : 1600); blip(smg ? 320 : 200, 0.06, 'square', 0.1, 90); }
+function sndHit() { blip(880, 0.05, 'triangle', 0.16); }
+function sndKill() { blip(660, 0.18, 'sawtooth', 0.18, 180); }
+function sndReload() { blip(150, 0.04, 'square', 0.13); setTimeout(() => blip(230, 0.05, 'square', 0.13), 170); }
+
 // --- стрельба ---
 let recoil = 0, lastShot = 0;
 function fire() {
@@ -273,6 +349,7 @@ function fire() {
   lastShot = now;
   cur.ammo--; hud();
   recoil = cur.recoil;
+  sndShoot(cur.name === 'SMG');
   // вспышка
   cur.flash.scaling.setAll(0.7 + Math.random() * 0.7);
   cur.flash.setEnabled(true);
@@ -293,9 +370,10 @@ function fire() {
       const sx = t.metadata.x, sz = t.metadata.z;
       targets.splice(targets.indexOf(t), 1);
       t.dispose();
-      kills++; hud();
+      kills++; hud(); sndKill();
       setTimeout(() => spawnTarget(sx, sz), 4000); // респавн мишени через 4 c
     } else {
+      sndHit();
       const em = t.material as B.StandardMaterial;
       em.emissiveColor = new B.Color3(0.85, 0.12, 0.12);
       setTimeout(() => { em.emissiveColor = new B.Color3(0.25, 0.02, 0.02); }, 90);
@@ -304,7 +382,7 @@ function fire() {
 }
 
 // --- ввод ---
-overlay.addEventListener('click', () => canvas.requestPointerLock());
+overlay.addEventListener('click', () => { audio().resume(); canvas.requestPointerLock(); });
 document.addEventListener('pointerlockchange', () => {
   overlay.style.display = document.pointerLockElement === canvas ? 'none' : 'flex';
 });
@@ -347,6 +425,7 @@ function toggleNearestDoor() {
 // Вертикаль считаем вручную: луч вниз ищет опору, position.y двигаем сами.
 let velY = 0;
 const GRAV = -0.013, JUMP = 0.23, EYE = 1.7;
+let bobPhase = 0, gunDip = 0, lastX = camera.position.x, lastZ = camera.position.z;
 scene.onBeforeRenderObservable.add(() => {
   const downRay = new B.Ray(camera.position, new B.Vector3(0, -1, 0), 60);
   const g = scene.pickWithRay(downRay, (m) => m.checkCollisions && targets.indexOf(m as B.Mesh) === -1);
@@ -367,10 +446,16 @@ scene.onBeforeRenderObservable.add(() => {
   // автоогонь (SMG): удержание ЛКМ
   if (mouseDown && cur.auto) fire();
 
-  // отдача активного оружия
+  // покачивание оружия при ходьбе + просадка при перезарядке + отдача
+  const moved = Math.hypot(camera.position.x - lastX, camera.position.z - lastZ) > 0.004;
+  lastX = camera.position.x; lastZ = camera.position.z;
+  bobPhase += moved ? 0.22 : 0.05;
+  const bobY = moved ? Math.abs(Math.sin(bobPhase)) * 0.014 : 0;
+  const bobX = moved ? Math.cos(bobPhase * 0.5) * 0.01 : 0;
+  gunDip += ((reloading ? 1 : 0) - gunDip) * 0.15; // плавная просадка ствола при перезарядке
   if (recoil > 0.001) { recoil *= 0.8; } else recoil = 0;
-  cur.node.position.z = gunHome.z - recoil;
-  cur.node.rotation.x = recoil * 1.5;
+  cur.node.position.set(gunHome.x + bobX, gunHome.y + bobY - gunDip * 0.28, gunHome.z - recoil);
+  cur.node.rotation.x = recoil * 1.5 + gunDip * 0.7;
 
   // двери: плавный доворот к целевому углу
   for (const dr of doors) {
