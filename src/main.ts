@@ -244,20 +244,20 @@ function buildCityMap(): B.Vector3 {
   box('b', 0, 2.5, 42, 96, 5, 1, concreteMat);
   box('b', -42, 2.5, 0, 1, 5, 84, concreteMat);
   box('b', 42, 2.5, 0, 1, 5, 84, concreteMat);
-  // платформа (floor-поверхность, без боковой коллизии) + визуальные ступени + пандус
-  const platform = box('platform', 0, 3.4, 0, 12, 0.4, 4, concreteMat);
+  // единый уровень крыш: платформа, мосты и крыши в одной ровной плоскости (LV=5.25)
+  const LV = 5.25;
+  const platform = box('platform', 0, LV - 0.2, 0, 14, 0.4, 6, concreteMat);
   platform.checkCollisions = false; platform.metadata = { floor: true };
-  for (let i = 0; i < 7; i++) {
-    const sh = (7 - i) * 0.5;
-    box('step', 0, sh / 2, -3 - i * 0.7, 4, sh, 0.7, concreteMat).checkCollisions = false;
+  // лестница к платформе: визуальные ступени (выше к платформе) + невидимый пандус 0→LV
+  for (let i = 0; i < 10; i++) {
+    const sh = (10 - i) * (LV / 10);
+    box('step', 0, sh / 2, -3 - i * 0.8, 5, sh, 0.8, concreteMat).checkCollisions = false;
   }
-  ramp('ramp', 0, 1.75, -5, 4, 6.6, 3.5, 5.4, concreteMat);
-  // мосты с платформы (верх 3.6) на крыши передних зданий (h=5 → крыша ~5.25), влево и вправо
-  const roofTop = 5.25, platTop = 3.6;
+  ramp('ramp', 0, LV / 2, -6.5, 5, 9.5, LV, 8.5, concreteMat);
+  // мосты — ПЛОСКИЕ слэбы на уровне LV от платформы к крышам передних зданий
   for (const sx of [-1, 1]) {
-    const b = box('bridge', sx * 7.4, (roofTop + platTop) / 2, 0, 4, 0.3, 3.2, concreteMat);
+    const b = box('bridge', sx * 7.5, LV - 0.2, 0, 5, 0.4, 3.2, concreteMat);
     b.checkCollisions = false; b.metadata = { floor: true };
-    b.rotation.z = sx * Math.atan2(roofTop - platTop, 3); // внешний край (к зданию) выше
   }
   ([[28, 8], [28, 3], [24, 8], [-28, 8], [-24, 3], [0, 33], [12, -20], [-12, -20], [-16, -6, 5.25], [16, -6, 5.25]] as [number, number, number?][])
     .forEach(([x, z, y]) => spawnTarget(x, z, y || 0));
