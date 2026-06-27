@@ -233,9 +233,9 @@ function spawnPickup(x: number, z: number, baseY = 0) {
 function buildCityMap(): B.Vector3 {
   const ground = B.MeshBuilder.CreateGround('ground', { width: 220, height: 220 }, scene);
   ground.material = groundMat; ground.checkCollisions = true; ground.receiveShadows = true; reg(ground);
-  // передние два здания — с заходом на крышу по мосту (боковая+задняя стена без коллизии)
-  building(-16, -6, 14, 12, 5, brickMat, 'east', true);
-  building(16, -6, 14, 12, 5, brick2Mat, 'west', true);
+  // передние два здания — заход на крышу по мосту (стены твёрдые: ходишь поверху на 5.25 > стен 5.0)
+  building(-16, -6, 14, 12, 5, brickMat);
+  building(16, -6, 14, 12, 5, brick2Mat);
   building(-16, 12, 14, 10, 6, brickMat);
   building(16, 12, 14, 10, 6, brick2Mat);
   building(0, 26, 18, 12, 7, brickMat);
