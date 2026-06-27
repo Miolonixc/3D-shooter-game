@@ -157,7 +157,8 @@ function building(cx: number, cz: number, w: number, d: number, h: number, m: B.
   box('w', cx - w / 2, h / 2, cz, t, h, d, m);              // левая
   box('w', cx + w / 2, h / 2, cz, t, h, d, m);              // правая
   const roof = box('roof', cx, h + 0.12, cz, w + 0.3, 0.25, d + 0.3, roofMat); // крыша
-  roof.checkCollisions = false; // крыша не должна быть невидимым потолком-препятствием
+  roof.checkCollisions = false;       // не потолок-препятствие
+  roof.metadata = { floor: true };    // по крыше можно ходить (через мост)
   // дверь — петля у левого края проёма (открывается автоматически при подходе)
   const dh = Math.min(h - 0.4, 2.8);
   const dw = door - 0.15;
@@ -245,8 +246,15 @@ function buildCityMap(): B.Vector3 {
     box('step', 0, sh / 2, -3 - i * 0.7, 4, sh, 0.7, concreteMat).checkCollisions = false;
   }
   ramp('ramp', 0, 1.75, -5, 4, 6.6, 3.5, 5.4, concreteMat);
-  ([[28, 8], [28, 3], [24, 8], [-28, 8], [-24, 3], [0, 33], [12, -20], [-12, -20]] as [number, number][])
-    .forEach(([x, z]) => spawnTarget(x, z));
+  // мосты с платформы (верх 3.6) на крыши передних зданий (h=5 → крыша ~5.25), влево и вправо
+  const roofTop = 5.25, platTop = 3.6;
+  for (const sx of [-1, 1]) {
+    const b = box('bridge', sx * 7.4, (roofTop + platTop) / 2, 0, 4, 0.3, 3.2, concreteMat);
+    b.checkCollisions = false; b.metadata = { floor: true };
+    b.rotation.z = sx * Math.atan2(roofTop - platTop, 3); // внешний край (к зданию) выше
+  }
+  ([[28, 8], [28, 3], [24, 8], [-28, 8], [-24, 3], [0, 33], [12, -20], [-12, -20], [-16, -6, 5.25], [16, -6, 5.25]] as [number, number, number?][])
+    .forEach(([x, z, y]) => spawnTarget(x, z, y || 0));
   // кубики — в открытых местах, подальше от стен (иначе не подобрать)
   ([[8, -8], [-8, -8], [28, 12], [-28, 12], [0, 12], [28, -8]] as [number, number][])
     .forEach(([x, z]) => spawnPickup(x, z));
