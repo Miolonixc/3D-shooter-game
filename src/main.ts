@@ -34,10 +34,10 @@ camera.checkCollisions = true;
 camera.applyGravity = false; // вертикаль считаем сами (прыжок/гравитация)
 camera.ellipsoid = new B.Vector3(0.5, 0.9, 0.5);
 camera.ellipsoidOffset = new B.Vector3(0, -0.8, 0);
-camera.keysUp = [87]; camera.keysDown = [83]; camera.keysLeft = [65]; camera.keysRight = [68];
-camera.keysUpward = []; camera.keysDownward = [];
-// своё управление обзором — убираем стандартный mouse input
+// движение и обзор обрабатываем сами (по event.code — раскладка-независимо),
+// поэтому убираем встроенные ввод мыши и клавиатуры камеры
 camera.inputs.removeByType('FreeCameraMouseInput');
+camera.inputs.removeByType('FreeCameraKeyboardMoveInput');
 
 // --- материалы ---
 const mat = (name: string, hex: string, spec = 0.04) => {
@@ -88,6 +88,20 @@ function speckleTex(name: string, base: string, fleck: string) {
   dt.update();
   return dt;
 }
+// плиточный пол: сетка плит с тёмными швами + лёгкая крапинка — чётко читается
+function tileTex(name: string, base: string, grout: string) {
+  const dt = new B.DynamicTexture(name, { width: 256, height: 256 }, scene, false);
+  const ctx = dt.getContext() as any;
+  ctx.fillStyle = grout; ctx.fillRect(0, 0, 256, 256);
+  const n = 4, gap = 6, cell = (256 - gap * (n + 1)) / n;
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    ctx.fillStyle = shade(base, 0.88 + Math.random() * 0.22);
+    ctx.fillRect(gap + c * (cell + gap), gap + r * (cell + gap), cell, cell);
+  }
+  for (let i = 0; i < 900; i++) { ctx.fillStyle = shade(base, 0.7 + Math.random() * 0.5); ctx.fillRect(Math.random() * 256, Math.random() * 256, 1.5, 1.5); }
+  dt.update();
+  return dt;
+}
 const white = () => new B.Color3(1, 1, 1);
 function applyTex(m: B.StandardMaterial, dt: B.DynamicTexture, scale: number) {
   dt.uScale = scale; dt.vScale = scale;
@@ -96,8 +110,12 @@ function applyTex(m: B.StandardMaterial, dt: B.DynamicTexture, scale: number) {
 }
 applyTex(brickMat, brickTex('bt1', '#b06848', '#3d2a22'), 2);
 applyTex(brick2Mat, brickTex('bt2', '#8b979c', '#33383b'), 2);
-applyTex(groundMat, speckleTex('gt', '#777770', '#5a5a52'), 24);
 applyTex(concreteMat, speckleTex('ct', '#a2a2a6', '#82828a'), 3);
+applyTex(groundMat, tileTex('floor', '#8a8a82', '#4a4a44'), 16); // плиточный пол
+
+// стены/постройки видны с обеих сторон — иначе изнутри здания они «невидимые»,
+// но коллизия остаётся (эффект невидимых стен)
+[brickMat, brick2Mat, concreteMat, roofMat, doorMat].forEach((m) => { m.backFaceCulling = false; });
 
 // --- земля ---
 const ground = B.MeshBuilder.CreateGround('ground', { width: 220, height: 220 }, scene);
@@ -118,8 +136,11 @@ function box(name: string, x: number, y: number, z: number, w: number, h: number
 // двери открываются на E; петля у левого края проёма, панель тянется вправо
 interface Door { hinge: B.TransformNode; panel: B.Mesh; open: boolean; }
 const doors: Door[] = [];
+// следы построек (для миникарты)
+const footprints: { cx: number; cz: number; w: number; d: number }[] = [];
 
 function building(cx: number, cz: number, w: number, d: number, h: number, m: B.Material) {
+  footprints.push({ cx, cz, w, d });
   const t = 0.5;       // толщина стены
   const door = 2.6;    // ширина проёма
   const seg = (w - door) / 2;
@@ -197,6 +218,42 @@ Object.assign(objEl.style, { top: '40px', left: '16px', font: '600 15px system-u
 document.body.appendChild(objEl);
 function objHud() { objEl.textContent = '🧊 Собрано: ' + collected + ' / ' + pickupTotal; }
 objHud();
+
+// --- миникарта (вид сверху) ---
+const MM = 168, MMHALF = MM / 2, MM_SPAN = 100; // мир ±50 → весь размер карты
+const mmCanvas = document.createElement('canvas');
+mmCanvas.width = MM; mmCanvas.height = MM;
+Object.assign(mmCanvas.style, { position: 'fixed', top: '14px', right: '14px', borderRadius: '8px', border: '2px solid rgba(255,255,255,.35)', zIndex: '4', pointerEvents: 'none' } as any);
+document.body.appendChild(mmCanvas);
+const mmctx = mmCanvas.getContext('2d')!;
+// мир (x вправо, z вперёд) → канвас (x вправо, z вверх)
+function w2m(x: number, z: number): [number, number] { return [MMHALF + (x / MM_SPAN) * MM, MMHALF - (z / MM_SPAN) * MM]; }
+function drawMinimap() {
+  mmctx.clearRect(0, 0, MM, MM);
+  mmctx.fillStyle = 'rgba(10,14,18,.55)'; mmctx.fillRect(0, 0, MM, MM);
+  // граница карты (±42)
+  const a = w2m(-42, 42), b = w2m(42, -42);
+  mmctx.strokeStyle = 'rgba(255,255,255,.5)'; mmctx.lineWidth = 1.5;
+  mmctx.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+  // здания
+  mmctx.fillStyle = 'rgba(150,160,170,.55)';
+  for (const f of footprints) { const tl = w2m(f.cx - f.w / 2, f.cz + f.d / 2); mmctx.fillRect(tl[0], tl[1], (f.w / MM_SPAN) * MM, (f.d / MM_SPAN) * MM); }
+  // мишени
+  mmctx.fillStyle = '#e64545';
+  for (const t of targets) { const p = w2m(t.position.x, t.position.z); mmctx.beginPath(); mmctx.arc(p[0], p[1], 2.6, 0, 7); mmctx.fill(); }
+  // кубики
+  mmctx.fillStyle = '#34d0c0';
+  for (const c of pickups) { const p = w2m(c.position.x, c.position.z); mmctx.beginPath(); mmctx.arc(p[0], p[1], 2, 0, 7); mmctx.fill(); }
+  // игрок — стрелка по направлению взгляда (тот же маппинг, что и для позиций)
+  const fwd = camera.getDirection(B.Vector3.Forward());
+  const pp = w2m(camera.position.x, camera.position.z);
+  const pa = w2m(camera.position.x + fwd.x, camera.position.z + fwd.z);
+  const ang = Math.atan2(pa[1] - pp[1], pa[0] - pp[0]);
+  mmctx.save(); mmctx.translate(pp[0], pp[1]); mmctx.rotate(ang);
+  mmctx.fillStyle = '#ffd23a';
+  mmctx.beginPath(); mmctx.moveTo(7, 0); mmctx.lineTo(-4, -4.5); mmctx.lineTo(-4, 4.5); mmctx.closePath(); mmctx.fill();
+  mmctx.restore();
+}
 
 // --- материалы оружия ---
 const bluedMat = mat('blued', '#15161b', 0.55);          // воронёная сталь
@@ -404,15 +461,20 @@ let mouseDown = false;
 document.addEventListener('mousedown', (e) => { if (locked() && e.button === 0) { mouseDown = true; fire(); } });
 document.addEventListener('mouseup', () => { mouseDown = false; });
 
+// движение по физическим кодам клавиш (event.code) — работает на любой
+// раскладке (WASD == ЦФЫВ), плюс стрелки
 let jumpQueued = false;
+const held = new Set<string>();
 window.addEventListener('keydown', (e) => {
-  const k = e.key.toLowerCase();
-  if (k === ' ') jumpQueued = true;
-  if (k === '1') switchWeapon(0);
-  if (k === '2') switchWeapon(1);
-  if (k === 'r' || k === 'к') reload();
-  if (k === 'e' || k === 'у') toggleNearestDoor();
+  held.add(e.code);
+  if (e.code === 'Space') jumpQueued = true;
+  if (e.code === 'Digit1') switchWeapon(0);
+  if (e.code === 'Digit2') switchWeapon(1);
+  if (e.code === 'KeyR') reload();
+  if (e.code === 'KeyE') toggleNearestDoor();
 });
+window.addEventListener('keyup', (e) => held.delete(e.code));
+window.addEventListener('blur', () => held.clear()); // не залипать при потере фокуса
 
 // --- сенсорное управление (телефон) ---
 // touchMove на уровне модуля — render-loop двигает камеру через cameraDirection.
@@ -508,13 +570,18 @@ scene.onBeforeRenderObservable.add(() => {
   // автоогонь (SMG): удержание ЛКМ
   if (mouseDown && cur.auto) fire();
 
-  // движение с джойстика (телефон): добавляем в cameraDirection — камера
-  // применит со встроенными коллизиями, как обычный WASD-ввод
-  if (touchMove.x || touchMove.y) {
+  // движение: клавиатура (по event.code, любая раскладка) + джойстик (телефон).
+  // Добавляем в cameraDirection — камера применит со встроенными коллизиями.
+  let inX = touchMove.x, inZ = touchMove.y;
+  if (locked()) {
+    inZ += (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0) - (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0);
+    inX += (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0) - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0);
+  }
+  if (inX || inZ) {
     const fwd = camera.getDirection(B.Vector3.Forward()); fwd.y = 0; fwd.normalize();
     const right = camera.getDirection(B.Vector3.Right()); right.y = 0; right.normalize();
-    camera.cameraDirection.addInPlace(fwd.scale(touchMove.y * camera.speed));
-    camera.cameraDirection.addInPlace(right.scale(touchMove.x * camera.speed));
+    camera.cameraDirection.addInPlace(fwd.scale(inZ * camera.speed));
+    camera.cameraDirection.addInPlace(right.scale(inX * camera.speed));
   }
 
   // покачивание оружия при ходьбе + просадка при перезарядке + отдача
@@ -544,6 +611,8 @@ scene.onBeforeRenderObservable.add(() => {
       c.dispose(); pickups.splice(i, 1); collected++; objHud();
     }
   }
+
+  drawMinimap();
 });
 
 // Babylon обновляет мировой bounding box лениво — у статичных мешей,
@@ -555,4 +624,4 @@ engine.runRenderLoop(() => scene.render());
 window.addEventListener('resize', () => engine.resize());
 
 // отладка
-(window as any).GAME = { engine, scene, camera, targets, weapons, fire, switchWeapon, getCur: () => cur };
+(window as any).GAME = { engine, scene, camera, targets, pickups, weapons, fire, switchWeapon, getCur: () => cur, held, footprints, w2m, drawMinimap, MM, MMHALF, MM_SPAN };
