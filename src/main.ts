@@ -113,24 +113,30 @@ applyTex(brick2Mat, brickTex('bt2', '#8b979c', '#33383b'), 5);
 applyTex(concreteMat, speckleTex('ct', '#a2a2a6', '#82828a'), 4);
 applyTex(groundMat, tileTex('floor', '#9a9a90', '#3c3c36'), 10); // плиточный пол — крупнее и контрастнее
 
+// материалы карты cs_assault
+const streetMat = mat('street', '#3a3d42');                 // асфальт
+const vanMat = mat('van', '#c9a227', 0.2);                  // фургон (жёлтый)
+const crateMat = mat('crate', '#7a5638', 0.05);             // ящики-укрытия
+const galleryMat = mat('gallery', '#565b61', 0.15);         // сталь галереи
+applyTex(crateMat, brickTex('crt', '#8a6541', '#43321f'), 1); // дерево-ящик
+applyTex(galleryMat, speckleTex('gst', '#565b61', '#3f4348'), 2);
+
 // стены/постройки видны с обеих сторон — иначе изнутри здания они «невидимые»,
 // но коллизия остаётся (эффект невидимых стен)
-[brickMat, brick2Mat, concreteMat, roofMat, doorMat].forEach((m) => { m.backFaceCulling = false; });
-
-// --- земля ---
-const ground = B.MeshBuilder.CreateGround('ground', { width: 220, height: 220 }, scene);
-ground.material = groundMat;
-ground.checkCollisions = true;
-ground.receiveShadows = true;
+[brickMat, brick2Mat, concreteMat, roofMat, doorMat, galleryMat, vanMat, crateMat].forEach((m) => { m.backFaceCulling = false; });
 
 // --- постройки ---
+// меши текущей карты собираются в sink (для выгрузки при смене карты);
+// оружие строится при sink=null и не попадает сюда
+let sink: B.AbstractMesh[] | null = null;
+function reg<T extends B.AbstractMesh>(m: T): T { if (sink) sink.push(m); return m; }
 function box(name: string, x: number, y: number, z: number, w: number, h: number, d: number, material: B.Material) {
   const m = B.MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
   m.position.set(x, y, z);
   m.material = material;
   m.checkCollisions = true;
   m.receiveShadows = true;
-  return m;
+  return reg(m);
 }
 
 // двери открываются на E; петля у левого края проёма, панель тянется вправо
@@ -164,70 +170,153 @@ function building(cx: number, cz: number, w: number, d: number, h: number, m: B.
   doors.push({ hinge, panel: dr, open: false });
 }
 
-building(-16, -6, 14, 12, 5, brickMat);
-building(16, -6, 14, 12, 5, brick2Mat);
-building(-16, 12, 14, 10, 6, brickMat);
-building(16, 12, 14, 10, 6, brick2Mat);
-building(0, 26, 18, 12, 7, brickMat);
-
-// граница карты
-box('b', 0, 2.5, -42, 96, 5, 1, concreteMat);
-box('b', 0, 2.5, 42, 96, 5, 1, concreteMat);
-box('b', -42, 2.5, 0, 1, 5, 84, concreteMat);
-box('b', 42, 2.5, 0, 1, 5, 84, concreteMat);
-
-// --- перепад высоты: платформа + лестница ---
-// платформа — поверхность ходьбы (через metadata.floor), без горизонтальной коллизии,
-// чтобы с лестницы заходить на неё без «порога»
-const platform = box('platform', 0, 3.4, 0, 12, 0.4, 4, concreteMat);
-platform.checkCollisions = false;
-platform.metadata = { floor: true };
-// визуальные ступени поднимаются к платформе (ближняя к ней — самая высокая),
-// БЕЗ горизонтальной коллизии — подъём обеспечивает невидимый пандус ниже
-for (let i = 0; i < 7; i++) {
-  const sh = (7 - i) * 0.5;                       // z=-3 высокая (~3.4), z=-7.2 низкая (~0.5)
-  const st = box('step', 0, sh / 2, -3 - i * 0.7, 4, sh, 0.7, concreteMat);
-  st.checkCollisions = false;
+// наклонный пандус-поверхность (для лестниц/подъёмов): луч опоры видит через metadata.floor.
+// alongX=true — подъём вдоль X (rotation.z), иначе вдоль Z (rotation.x).
+function ramp(name: string, x: number, y: number, z: number, w: number, d: number, rise: number, run: number, m: B.Material, visible = false, alongX = false) {
+  const r = box(name, x, y, z, w, 0.3, d, m);
+  r.isVisible = visible;
+  r.checkCollisions = false;
+  r.isPickable = true;
+  r.metadata = { floor: true };
+  if (alongX) r.rotation.z = Math.atan2(rise, run);
+  else r.rotation.x = -Math.atan2(rise, run);
+  return r;
 }
-// невидимый наклонный пандус — поверхность ходьбы по лестнице.
-// Луч опоры пикает его через metadata.floor; горизонтально не блокирует.
-const ramp = box('ramp', 0, 1.75, -5, 4, 0.3, 6.6, concreteMat);
-ramp.isVisible = false;
-ramp.checkCollisions = false;
-ramp.isPickable = true;
-ramp.metadata = { floor: true };
-ramp.rotation.x = -Math.atan2(3.5, 5.4);          // от земли (z≈-8) к платформе (z≈-2, y≈3.5)
+
+// одиночная авто-дверь в проёме стены. alongX — дверь поперёк X (южная/северная стена),
+// иначе поперёк Z (восточная/западная стена). Петля у края проёма.
+function doorAt(cx: number, cz: number, width: number, height: number, alongX: boolean) {
+  const hinge = new B.TransformNode('hinge', scene);
+  hinge.position.set(cx - (alongX ? width / 2 : 0), height / 2, cz - (alongX ? 0 : width / 2));
+  const dr = alongX
+    ? box('door', 0, 0, 0, width, height, 0.16, doorMat)
+    : box('door', 0, 0, 0, 0.16, height, width, doorMat);
+  dr.parent = hinge;
+  dr.position.set(alongX ? width / 2 : 0, 0, alongX ? 0 : width / 2);
+  dr.checkCollisions = true;
+  doors.push({ hinge, panel: dr, open: false });
+}
 
 // --- цели ---
 const targetMat = mat('target', '#d83030', 0.1);
 targetMat.emissiveColor = new B.Color3(0.25, 0.02, 0.02);
 const targets: B.Mesh[] = [];
-function spawnTarget(x: number, z: number) {
+function spawnTarget(x: number, z: number, baseY = 0) {
   const t = B.MeshBuilder.CreateBox('target', { width: 0.85, height: 1.7, depth: 0.4 }, scene);
-  t.position.set(x, 0.85, z);
+  t.position.set(x, baseY + 0.85, z);
   t.material = targetMat.clone('target_' + targets.length)!; // своя копия — подсветка попадания не задевает остальных
-  t.metadata = { hp: 100, x, z };                            // x/z — для респавна
+  t.metadata = { hp: 100, x, z, y: baseY };                  // x/z/y — для респавна
   t.computeWorldMatrix(true); t.refreshBoundingInfo();       // корректный мировой bbox (важно при респавне)
   targets.push(t);
 }
-([[28, 8], [28, 3], [24, 8], [-28, 8], [-24, 3], [0, 33], [12, -20], [-12, -20]] as [number, number][])
-  .forEach(([x, z]) => spawnTarget(x, z));
 
 // --- собираемые кубики ---
 const pickMat = mat('pickup', '#34d0c0', 0.2);
 pickMat.emissiveColor = new B.Color3(0.05, 0.36, 0.33);
 const pickups: B.Mesh[] = [];
-function spawnPickup(x: number, z: number) {
+function spawnPickup(x: number, z: number, baseY = 0) {
   const c = B.MeshBuilder.CreateBox('pickup', { size: 0.5 }, scene);
-  c.position.set(x, 0.8, z);
+  c.position.set(x, baseY + 0.8, z);
   c.material = pickMat;
   c.checkCollisions = false; c.isPickable = false;
   pickups.push(c);
 }
-([[8, -8], [-8, -8], [16, 18], [-16, 18], [0, 12], [20, -16]] as [number, number][])
-  .forEach(([x, z]) => spawnPickup(x, z));
-const pickupTotal = pickups.length;
+
+// ===== карта 1: «Арена (город)» =====
+function buildCityMap(): B.Vector3 {
+  const ground = B.MeshBuilder.CreateGround('ground', { width: 220, height: 220 }, scene);
+  ground.material = groundMat; ground.checkCollisions = true; ground.receiveShadows = true; reg(ground);
+  building(-16, -6, 14, 12, 5, brickMat);
+  building(16, -6, 14, 12, 5, brick2Mat);
+  building(-16, 12, 14, 10, 6, brickMat);
+  building(16, 12, 14, 10, 6, brick2Mat);
+  building(0, 26, 18, 12, 7, brickMat);
+  // граница карты
+  box('b', 0, 2.5, -42, 96, 5, 1, concreteMat);
+  box('b', 0, 2.5, 42, 96, 5, 1, concreteMat);
+  box('b', -42, 2.5, 0, 1, 5, 84, concreteMat);
+  box('b', 42, 2.5, 0, 1, 5, 84, concreteMat);
+  // платформа (floor-поверхность, без боковой коллизии) + визуальные ступени + пандус
+  const platform = box('platform', 0, 3.4, 0, 12, 0.4, 4, concreteMat);
+  platform.checkCollisions = false; platform.metadata = { floor: true };
+  for (let i = 0; i < 7; i++) {
+    const sh = (7 - i) * 0.5;
+    box('step', 0, sh / 2, -3 - i * 0.7, 4, sh, 0.7, concreteMat).checkCollisions = false;
+  }
+  ramp('ramp', 0, 1.75, -5, 4, 6.6, 3.5, 5.4, concreteMat);
+  ([[28, 8], [28, 3], [24, 8], [-28, 8], [-24, 3], [0, 33], [12, -20], [-12, -20]] as [number, number][])
+    .forEach(([x, z]) => spawnTarget(x, z));
+  ([[8, -8], [-8, -8], [16, 18], [-16, 18], [0, 12], [20, -16]] as [number, number][])
+    .forEach(([x, z]) => spawnPickup(x, z));
+  return new B.Vector3(0, 1.7, -26);
+}
+
+// ===== карта 2: «cs_assault» (клон) =====
+// Склад 40×28 (x∈[-20,20], z∈[0,28]), улица к югу (z<0, спавн CT). Высоты: пол 0,
+// фургон/окно ~2.2, галерея 3.5, стены 7. Входы: A ворота (юг), B окно+фургон (запад),
+// C боковая дверь (восток), D задняя (север).
+function buildAssaultMap(): B.Vector3 {
+  const H = 7, T = 0.6;
+  const street = B.MeshBuilder.CreateGround('ground', { width: 130, height: 130 }, scene);
+  street.material = streetMat; street.checkCollisions = true; street.receiveShadows = true; reg(street);
+  const floor = box('whfloor', 0, -0.04, 14, 40, 0.1, 28, concreteMat);
+  floor.checkCollisions = false; floor.metadata = { floor: true };
+  footprints.push({ cx: 0, cz: 14, w: 40, d: 28 });   // склад на миникарте
+  footprints.push({ cx: -25, cz: 10, w: 5, d: 3 });   // фургон
+
+  // стены склада с проёмами
+  box('whw', -11.5, H / 2, 0, 17, H, T, concreteMat);     // юг, лево от ворот A
+  box('whw', 11.5, H / 2, 0, 17, H, T, concreteMat);      // юг, право
+  box('whw', 0, H - 1, 0, 6, 2, T, concreteMat);          // перемычка над A
+  box('whw', -11, H / 2, 28, 18, H, T, concreteMat);      // север, лево от двери D
+  box('whw', 11, H / 2, 28, 18, H, T, concreteMat);       // север, право
+  box('whw', 0, H - 1, 28, 4, 2, T, concreteMat);         // перемычка над D
+  box('whw', -20, H / 2, 4, T, H, 8, concreteMat);        // запад z0..8
+  box('whw', -20, H / 2, 20, T, H, 16, concreteMat);      // запад z12..28
+  box('whw', -20, 1, 10, T, 2, 4, concreteMat);           // под окном B (y0..2)
+  box('whw', -20, 5.4, 10, T, 3.2, 4, concreteMat);       // над окном B (y3.8..7)
+  box('whw', 20, H / 2, 8, T, H, 16, concreteMat);        // восток z0..16
+  box('whw', 20, H / 2, 23.5, T, H, 9, concreteMat);      // восток z19..28
+  box('whw', 20, 4.8, 17.5, T, 4.4, 3, concreteMat);      // перемычка над дверью C
+
+  // авто-двери в проёмах A/C/D
+  doorAt(0, 0, 5.6, 4.8, true);     // A — ворота (юг)
+  doorAt(0, 28, 3.4, 3.4, true);    // D — задняя (север)
+  doorAt(20, 17.5, 2.8, 2.4, false);// C — боковая (восток)
+
+  // галерея 2-го яруса (T-зона) по трём стенам + перила + пандус наверх
+  const galY = 3.5;
+  for (const [n, x, z, w, d] of [['galW', -18, 14, 4, 28], ['galE', 18, 14, 4, 28], ['galN', 0, 26, 40, 4]] as [string, number, number, number, number][]) {
+    const g = box(n, x, galY, z, w, 0.3, d, galleryMat); g.checkCollisions = false; g.metadata = { floor: true };
+  }
+  box('rail', -16, galY + 0.5, 14, 0.15, 1, 28, galleryMat).checkCollisions = false;
+  box('rail', 16, galY + 0.5, 14, 0.15, 1, 28, galleryMat).checkCollisions = false;
+  box('rail', 0, galY + 0.5, 24, 32, 1, 0.15, galleryMat).checkCollisions = false;
+  ramp('gramp', -17, 1.75, 6, 3.6, 7, 3.5, 6.2, galleryMat, true); // пол → западная галерея
+
+  // фургон (точка B) + заезд на крышу + мостик через окно на галерею
+  box('van', -25, 1.1, 10, 5, 2.2, 3, vanMat);
+  box('vancab', -21.9, 0.9, 10, 1.2, 1.8, 2.6, vanMat);
+  ramp('vanramp', -29, 1.1, 10, 3, 2.6, 2.2, 3, vanMat, true, true); // заезд на крышу фургона (вдоль X)
+  const ledge = box('ledgeB', -21.3, 2.2, 10, 3.4, 0.2, 3.4, concreteMat); ledge.checkCollisions = false; ledge.metadata = { floor: true };
+  const ledgeIn = box('ledgeIn', -18.4, 2.2, 10, 3, 0.2, 3.4, concreteMat); ledgeIn.checkCollisions = false; ledgeIn.metadata = { floor: true };
+  ramp('bramp', -17, 2.85, 12.6, 3, 3, 1.3, 2.4, galleryMat); // уступ 2.2 → галерея 3.5
+
+  // ящики-укрытия (склад + улица)
+  ([[-8, 8, 1.4], [-6, 9.6, 1.4], [7, 7, 1.6], [9, 16, 1.4], [0, 20, 1.5], [-3, 22, 1.3], [6, 13, 1.2], [-6, -12, 1.4], [7, -16, 1.4]] as [number, number, number][])
+    .forEach(([x, z, s]) => box('crate', x, s / 2, z, s, s, s, crateMat));
+
+  // мишени (T): на галерее + на полу
+  spawnTarget(-18, 6, galY); spawnTarget(-18, 22, galY); spawnTarget(18, 10, galY); spawnTarget(0, 26, galY);
+  spawnTarget(-8, 13); spawnTarget(8, 18); spawnTarget(0, 6);
+  ([[-8, 20], [8, 8], [0, 14], [-12, 24]] as [number, number][]).forEach(([x, z]) => spawnPickup(x, z));
+
+  return new B.Vector3(0, 1.7, -22); // CT спавн на улице у ворот A
+}
+
+let pickupTotal = 0;
 let collected = 0;
+let mapGen = 0; // поколение карты — чтобы отложенные респавны со старой карты не утекали
 const objEl = document.createElement('div');
 objEl.className = 'hud';
 Object.assign(objEl.style, { top: '40px', left: '16px', font: '600 15px system-ui', color: '#bdeff0' } as any);
@@ -440,11 +529,11 @@ function fire() {
     hitMarker(headshot);
     dmgPopup(hit.pickedPoint, dmg, headshot);
     if (t.metadata.hp <= 0) {
-      const sx = t.metadata.x, sz = t.metadata.z;
+      const sx = t.metadata.x, sz = t.metadata.z, sy = t.metadata.y || 0, gen = mapGen;
       targets.splice(targets.indexOf(t), 1);
       t.dispose();
       kills++; hud(); sndKill();
-      setTimeout(() => spawnTarget(sx, sz), 4000); // респавн мишени через 4 c
+      setTimeout(() => { if (gen === mapGen) spawnTarget(sx, sz, sy); }, 4000); // респавн через 4 c (только если карта та же)
     } else {
       sndHit();
       const em = t.material as B.StandardMaterial;
@@ -487,6 +576,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Digit1') switchWeapon(0);
   if (e.code === 'Digit2') switchWeapon(1);
   if (e.code === 'KeyR') reload();
+  if (e.code === 'KeyM') loadMap(curMap + 1);
 });
 window.addEventListener('keyup', (e) => held.delete(e.code));
 window.addEventListener('blur', () => held.clear()); // не залипать при потере фокуса
@@ -619,13 +709,55 @@ scene.onBeforeRenderObservable.add(() => {
   drawMinimap();
 });
 
-// Babylon обновляет мировой bounding box лениво — у статичных мешей,
-// которым задали position уже после создания, он остаётся в начале координат,
-// из-за чего pickWithRay (стрельба) и лучи опоры промахиваются. Форсируем пересчёт.
-scene.meshes.forEach((m) => { m.refreshBoundingInfo(); m.computeWorldMatrix(true); });
+// ===== система карт =====
+const mapDefs: { name: string; build: () => B.Vector3 }[] = [
+  { name: 'Арена (город)', build: buildCityMap },
+  { name: 'cs_assault', build: buildAssaultMap },
+];
+let curMap = 0;
+let levelMeshes: B.AbstractMesh[] = [];
+
+const mapToast = document.createElement('div');
+Object.assign(mapToast.style, { position: 'fixed', top: '46%', left: '50%', transform: 'translate(-50%,-50%)', font: '700 26px system-ui', color: '#fff', textShadow: '0 2px 6px #000', background: 'rgba(0,0,0,.45)', padding: '10px 22px', borderRadius: '10px', opacity: '0', transition: 'opacity .3s', pointerEvents: 'none', zIndex: '20' } as any);
+document.body.appendChild(mapToast);
+let toastTimer = 0;
+function showMapName(name: string) {
+  mapToast.textContent = '🗺 ' + name + '  (M — сменить карту)';
+  mapToast.style.opacity = '1';
+  clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => { mapToast.style.opacity = '0'; }, 1600);
+}
+
+function loadMap(i: number) {
+  // выгрузка прошлой карты
+  for (const m of levelMeshes) if (!m.isDisposed()) m.dispose();
+  for (const d of doors) d.hinge.dispose(true);
+  for (const t of targets) t.dispose();
+  for (const p of pickups) p.dispose();
+  levelMeshes = []; doors.length = 0; footprints.length = 0; targets.length = 0; pickups.length = 0;
+  mapGen++; // отменяем отложенные респавны прошлой карты
+  // сборка новой
+  curMap = ((i % mapDefs.length) + mapDefs.length) % mapDefs.length;
+  const meshes: B.AbstractMesh[] = [];
+  sink = meshes;
+  const spawn = mapDefs[curMap].build();
+  sink = null;
+  levelMeshes = meshes;
+  // сброс состояния игры
+  kills = 0; collected = 0; pickupTotal = pickups.length; reloading = false;
+  hud(); objHud();
+  // спавн + корректный мировой bbox (Babylon обновляет его лениво — иначе стрельба/опора мажут)
+  camera.position.copyFrom(spawn);
+  camera.rotation.set(0, 0, 0);
+  velY = 0;
+  scene.meshes.forEach((m) => { m.refreshBoundingInfo(); m.computeWorldMatrix(true); });
+  showMapName(mapDefs[curMap].name);
+}
+
+loadMap(0);
 
 engine.runRenderLoop(() => scene.render());
 window.addEventListener('resize', () => engine.resize());
 
 // отладка
-(window as any).GAME = { engine, scene, camera, targets, pickups, weapons, fire, switchWeapon, getCur: () => cur, held, footprints, w2m, drawMinimap, MM, MMHALF, MM_SPAN };
+(window as any).GAME = { engine, scene, camera, targets, pickups, weapons, fire, switchWeapon, getCur: () => cur, held, footprints, w2m, drawMinimap, MM, MMHALF, MM_SPAN, loadMap, mapDefs, getMap: () => curMap };
