@@ -108,10 +108,10 @@ function applyTex(m: B.StandardMaterial, dt: B.DynamicTexture, scale: number) {
   m.diffuseTexture = dt;
   m.diffuseColor = white(); // текстура несёт цвет — иначе двойное затемнение
 }
-applyTex(brickMat, brickTex('bt1', '#b06848', '#3d2a22'), 2);
-applyTex(brick2Mat, brickTex('bt2', '#8b979c', '#33383b'), 2);
-applyTex(concreteMat, speckleTex('ct', '#a2a2a6', '#82828a'), 3);
-applyTex(groundMat, tileTex('floor', '#8a8a82', '#4a4a44'), 16); // плиточный пол
+applyTex(brickMat, brickTex('bt1', '#b06848', '#3d2a22'), 5);   // мельче и реалистичнее
+applyTex(brick2Mat, brickTex('bt2', '#8b979c', '#33383b'), 5);
+applyTex(concreteMat, speckleTex('ct', '#a2a2a6', '#82828a'), 4);
+applyTex(groundMat, tileTex('floor', '#9a9a90', '#3c3c36'), 10); // плиточный пол — крупнее и контрастнее
 
 // стены/постройки видны с обеих сторон — иначе изнутри здания они «невидимые»,
 // но коллизия остаётся (эффект невидимых стен)
@@ -150,8 +150,9 @@ function building(cx: number, cz: number, w: number, d: number, h: number, m: B.
   box('w', cx, h / 2, cz + d / 2, w, h, t, m);              // задняя
   box('w', cx - w / 2, h / 2, cz, t, h, d, m);              // левая
   box('w', cx + w / 2, h / 2, cz, t, h, d, m);              // правая
-  box('roof', cx, h + 0.12, cz, w + 0.3, 0.25, d + 0.3, roofMat); // крыша
-  // дверь (открывается на E) — петля у левого края проёма
+  const roof = box('roof', cx, h + 0.12, cz, w + 0.3, 0.25, d + 0.3, roofMat); // крыша
+  roof.checkCollisions = false; // крыша не должна быть невидимым потолком-препятствием
+  // дверь — петля у левого края проёма (открывается автоматически при подходе)
   const dh = Math.min(h - 0.4, 2.8);
   const dw = door - 0.15;
   const hinge = new B.TransformNode('hinge', scene);
@@ -176,11 +177,26 @@ box('b', -42, 2.5, 0, 1, 5, 84, concreteMat);
 box('b', 42, 2.5, 0, 1, 5, 84, concreteMat);
 
 // --- перепад высоты: платформа + лестница ---
-box('platform', 0, 3.4, 0, 12, 0.4, 4, concreteMat);
+// платформа — поверхность ходьбы (через metadata.floor), без горизонтальной коллизии,
+// чтобы с лестницы заходить на неё без «порога»
+const platform = box('platform', 0, 3.4, 0, 12, 0.4, 4, concreteMat);
+platform.checkCollisions = false;
+platform.metadata = { floor: true };
+// визуальные ступени поднимаются к платформе (ближняя к ней — самая высокая),
+// БЕЗ горизонтальной коллизии — подъём обеспечивает невидимый пандус ниже
 for (let i = 0; i < 7; i++) {
-  const sh = (i + 1) * 0.5;
-  box('step', 0, sh / 2, -3 - i * 0.7, 4, sh, 0.7, concreteMat);
+  const sh = (7 - i) * 0.5;                       // z=-3 высокая (~3.4), z=-7.2 низкая (~0.5)
+  const st = box('step', 0, sh / 2, -3 - i * 0.7, 4, sh, 0.7, concreteMat);
+  st.checkCollisions = false;
 }
+// невидимый наклонный пандус — поверхность ходьбы по лестнице.
+// Луч опоры пикает его через metadata.floor; горизонтально не блокирует.
+const ramp = box('ramp', 0, 1.75, -5, 4, 0.3, 6.6, concreteMat);
+ramp.isVisible = false;
+ramp.checkCollisions = false;
+ramp.isPickable = true;
+ramp.metadata = { floor: true };
+ramp.rotation.x = -Math.atan2(3.5, 5.4);          // от земли (z≈-8) к платформе (z≈-2, y≈3.5)
 
 // --- цели ---
 const targetMat = mat('target', '#d83030', 0.1);
@@ -471,7 +487,6 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Digit1') switchWeapon(0);
   if (e.code === 'Digit2') switchWeapon(1);
   if (e.code === 'KeyR') reload();
-  if (e.code === 'KeyE') toggleNearestDoor();
 });
 window.addEventListener('keyup', (e) => held.delete(e.code));
 window.addEventListener('blur', () => held.clear()); // не залипать при потере фокуса
@@ -531,19 +546,6 @@ if (isTouch) {
   swBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); switchWeapon(wi === 0 ? 1 : 0); });
 }
 
-// открыть/закрыть ближайшую дверь в радиусе досягаемости
-function toggleNearestDoor() {
-  let nearest: Door | null = null, best = 3.4;
-  for (const dr of doors) {
-    const dist = B.Vector3.Distance(camera.position, dr.hinge.getAbsolutePosition());
-    if (dist < best) { best = dist; nearest = dr; }
-  }
-  if (nearest) {
-    nearest.open = !nearest.open;
-    nearest.panel.checkCollisions = !nearest.open; // открытая дверь не блокирует
-  }
-}
-
 // --- вертикаль (гравитация + прыжок) ---
 // Камера сама обрабатывает горизонтальные коллизии (WASD + checkCollisions).
 // Вертикаль считаем вручную: луч вниз ищет опору, position.y двигаем сами.
@@ -552,7 +554,7 @@ const GRAV = -0.013, JUMP = 0.23, EYE = 1.7;
 let bobPhase = 0, gunDip = 0, lastX = camera.position.x, lastZ = camera.position.z;
 scene.onBeforeRenderObservable.add(() => {
   const downRay = new B.Ray(camera.position, new B.Vector3(0, -1, 0), 60);
-  const g = scene.pickWithRay(downRay, (m) => m.checkCollisions && targets.indexOf(m as B.Mesh) === -1);
+  const g = scene.pickWithRay(downRay, (m) => (m.checkCollisions || (m.metadata && m.metadata.floor)) && targets.indexOf(m as B.Mesh) === -1);
   const standY = (g && g.hit && g.pickedPoint) ? g.pickedPoint.y + EYE : -Infinity;
   const grounded = camera.position.y <= standY + 0.05 && velY <= 0;
   if (grounded) {
@@ -595,8 +597,10 @@ scene.onBeforeRenderObservable.add(() => {
   cur.node.position.set(gunHome.x + bobX, gunHome.y + bobY - gunDip * 0.28, gunHome.z - recoil);
   cur.node.rotation.x = recoil * 1.5 + gunDip * 0.7;
 
-  // двери: плавный доворот к целевому углу
+  // двери: автооткрытие рядом с игроком + плавный доворот, коллизия по состоянию
   for (const dr of doors) {
+    dr.open = B.Vector3.Distance(camera.position, dr.hinge.getAbsolutePosition()) < 3;
+    dr.panel.checkCollisions = !dr.open;
     const tgt = dr.open ? -Math.PI / 2 : 0;
     dr.hinge.rotation.y += (tgt - dr.hinge.rotation.y) * 0.18;
   }
