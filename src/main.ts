@@ -1,4 +1,5 @@
 import * as B from '@babylonjs/core';
+import { loadBsp } from './bsp';
 
 const canvas = document.getElementById('app') as HTMLCanvasElement;
 const overlay = document.getElementById('overlay') as HTMLDivElement;
@@ -248,12 +249,12 @@ function buildCityMap(): B.Vector3 {
   const LV = 5.25;
   const platform = box('platform', 0, LV - 0.2, 0, 14, 0.4, 6, concreteMat);
   platform.checkCollisions = false; platform.metadata = { floor: true };
-  // лестница к платформе: визуальные ступени (выше к платформе) + невидимый пандус 0→LV
+  // лестница к платформе: ступени-поверхности (ходим по верху каждой ступени)
   for (let i = 0; i < 10; i++) {
     const sh = (10 - i) * (LV / 10);
-    box('step', 0, sh / 2, -3 - i * 0.8, 5, sh, 0.8, concreteMat).checkCollisions = false;
+    const st = box('step', 0, sh / 2, -3 - i * 0.8, 5, sh, 0.8, concreteMat);
+    st.checkCollisions = false; st.metadata = { floor: true };
   }
-  ramp('ramp', 0, LV / 2, -6.5, 5, 9.5, LV, 8.5, concreteMat);
   // мосты — ПЛОСКИЕ слэбы на уровне LV от платформы к крышам передних зданий
   for (const sx of [-1, 1]) {
     const b = box('bridge', sx * 7.5, LV - 0.2, 0, 5, 0.4, 3.2, concreteMat);
@@ -492,7 +493,14 @@ function dmgPopup(point: B.Vector3, dmg: number, head: boolean) {
 // --- звук (синтез через WebAudio, без файлов) ---
 let actx: AudioContext | null = null;
 function audio() {
-  if (!actx) actx = new (window.AudioContext || (window as any).webkitAudioContext)();
+  if (!actx) {
+    actx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    // тихий keep-alive генератор держит аудио-конвейер «прогретым» —
+    // иначе у первого выстрела (и после паузы) большая задержка звука
+    const ka = actx.createOscillator(), kg = actx.createGain();
+    kg.gain.value = 0.0001; ka.connect(kg).connect(actx.destination); ka.start();
+  }
+  if (actx.state === 'suspended') actx.resume();
   return actx;
 }
 function blip(freq: number, dur: number, type: OscillatorType, vol: number, slideTo?: number) {
@@ -583,11 +591,13 @@ let mouseDown = false;
 document.addEventListener('mousedown', (e) => { if (locked() && e.button === 0) { mouseDown = true; fire(); } });
 document.addEventListener('mouseup', () => { mouseDown = false; });
 
-// движение по физическим кодам клавиш (event.code) — работает на любой
-// раскладке (WASD == ЦФЫВ), плюс стрелки
+// движение по физическим кодам клавиш (event.code) — любая раскладка (WASD == ЦФЫВ).
+// Стрелки ←/→ — поворот камеры, Ctrl — присед (вертикаль/движение в render-loop).
 let jumpQueued = false;
 const held = new Set<string>();
+const gameKeys = new Set(['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'ControlLeft', 'ControlRight']);
 window.addEventListener('keydown', (e) => {
+  if (gameKeys.has(e.code)) e.preventDefault(); // не скроллить страницу / не триггерить шорткаты
   held.add(e.code);
   if (e.code === 'Space') jumpQueued = true;
   if (e.code === 'Digit1') switchWeapon(0);
@@ -656,44 +666,53 @@ if (isTouch) {
 // --- вертикаль (гравитация + прыжок) ---
 // Камера сама обрабатывает горизонтальные коллизии (WASD + checkCollisions).
 // Вертикаль считаем вручную: луч вниз ищет опору, position.y двигаем сами.
-let velY = 0;
+let velY = 0, onGround = true;
 const GRAV = -0.013, JUMP = 0.23, EYE = 1.7, MOVE = 0.06; // MOVE — ускорение ходьбы (≈8 ед/с)
 const spawnPoint = new B.Vector3(0, EYE, -26);             // точка спавна текущей карты
 let bobPhase = 0, gunDip = 0, lastX = camera.position.x, lastZ = camera.position.z;
 scene.onBeforeRenderObservable.add(() => {
+  const crouching = held.has('ControlLeft') || held.has('ControlRight');
+  const eyeNow = crouching ? 1.05 : EYE; // присед опускает камеру
   const downRay = new B.Ray(camera.position, new B.Vector3(0, -1, 0), 60);
   const g = scene.pickWithRay(downRay, (m) => (m.checkCollisions || (m.metadata && m.metadata.floor)) && targets.indexOf(m as B.Mesh) === -1);
-  const standY = (g && g.hit && g.pickedPoint) ? g.pickedPoint.y + EYE : -Infinity;
-  const grounded = camera.position.y <= standY + 0.05 && velY <= 0;
-  if (grounded) {
-    camera.position.y = standY;
-    velY = jumpQueued ? JUMP : 0;
+  const floorY = (g && g.hit && g.pickedPoint) ? g.pickedPoint.y : -1e9;
+  if (onGround) {
+    // приклеены к полу на текущей высоте глаз (мгновенный присед, ступени/спуски до 1 м)
+    if (camera.position.y - eyeNow <= floorY + 1.0) {
+      camera.position.y = floorY + eyeNow;
+      velY = 0;
+      if (jumpQueued) { velY = crouching ? 0.28 : JUMP; onGround = false; } // присед-прыжок выше
+    } else {
+      onGround = false; // пол ушёл вниз — падаем
+    }
   } else {
     velY += GRAV;
     camera.position.y += velY;
-    if (camera.position.y < standY) { camera.position.y = standY; velY = 0; }
+    if (camera.position.y - eyeNow <= floorY) { camera.position.y = floorY + eyeNow; velY = 0; onGround = true; }
   }
   jumpQueued = false;
   // упал с карты — вернуть на спавн текущей карты
-  if (camera.position.y < -8) { camera.position.copyFrom(spawnPoint); velY = 0; }
+  if (camera.position.y < -8) { camera.position.copyFrom(spawnPoint); velY = 0; onGround = true; }
 
   // автоогонь (SMG): удержание ЛКМ
   if (mouseDown && cur.auto) fire();
 
-  // движение: клавиатура (по event.code, любая раскладка) + джойстик (телефон).
-  // Добавляем в cameraDirection — камера применит со встроенными коллизиями.
+  // движение: WASD/ЦФЫВ (по event.code) + джойстик (телефон). Стрелки ←/→ — поворот камеры.
   let inX = touchMove.x, inZ = touchMove.y;
   if (locked()) {
-    inZ += (held.has('KeyW') || held.has('ArrowUp') ? 1 : 0) - (held.has('KeyS') || held.has('ArrowDown') ? 1 : 0);
-    inX += (held.has('KeyD') || held.has('ArrowRight') ? 1 : 0) - (held.has('KeyA') || held.has('ArrowLeft') ? 1 : 0);
+    inZ += (held.has('KeyW') ? 1 : 0) - (held.has('KeyS') ? 1 : 0);
+    inX += (held.has('KeyD') ? 1 : 0) - (held.has('KeyA') ? 1 : 0);
+    if (held.has('ArrowLeft')) camera.rotation.y -= 0.035;
+    if (held.has('ArrowRight')) camera.rotation.y += 0.035;
   }
   const inMag = Math.hypot(inX, inZ);
   if (inMag > 0.001) {
     if (inMag > 1) { inX /= inMag; inZ /= inMag; } // по диагонали не быстрее
+    const spd = MOVE * (crouching ? 0.5 : 1); // в приседе медленнее
     const fwd = camera.getDirection(B.Vector3.Forward()); fwd.y = 0; fwd.normalize();
     const right = camera.getDirection(B.Vector3.Right()); right.y = 0; right.normalize();
-    camera.cameraDirection.addInPlace(fwd.scale(inZ * MOVE));
-    camera.cameraDirection.addInPlace(right.scale(inX * MOVE));
+    camera.cameraDirection.addInPlace(fwd.scale(inZ * spd));
+    camera.cameraDirection.addInPlace(right.scale(inX * spd));
   }
 
   // покачивание оружия при ходьбе + просадка при перезарядке + отдача
@@ -729,13 +748,23 @@ scene.onBeforeRenderObservable.add(() => {
   drawMinimap();
 });
 
+// ===== карта из настоящего BSP (Counter-Strike cs_assault) =====
+async function buildBspMap(): Promise<B.Vector3> {
+  const baseUrl = ((import.meta as any).env && (import.meta as any).env.BASE_URL) || './';
+  const r = await loadBsp(scene, baseUrl + 'cs_assault.bsp', 0.03);
+  reg(r.mesh); // в текущую карту (sink) для выгрузки при смене
+  return new B.Vector3(r.spawn.x, r.spawn.y + EYE, r.spawn.z); // камера = точка спавна + рост глаз
+}
+
 // ===== система карт =====
-const mapDefs: { name: string; build: () => B.Vector3 }[] = [
+const mapDefs: { name: string; build: () => B.Vector3 | Promise<B.Vector3> }[] = [
+  { name: 'cs_assault (BSP)', build: buildBspMap },
   { name: 'Арена (город)', build: buildCityMap },
-  { name: 'cs_assault', build: buildAssaultMap },
+  { name: 'cs_assault (клон)', build: buildAssaultMap },
 ];
 let curMap = 0;
 let levelMeshes: B.AbstractMesh[] = [];
+let mapLoading = false;
 
 const mapToast = document.createElement('div');
 Object.assign(mapToast.style, { position: 'fixed', top: '46%', left: '50%', transform: 'translate(-50%,-50%)', font: '700 26px system-ui', color: '#fff', textShadow: '0 2px 6px #000', background: 'rgba(0,0,0,.45)', padding: '10px 22px', borderRadius: '10px', opacity: '0', transition: 'opacity .3s', pointerEvents: 'none', zIndex: '20' } as any);
@@ -748,7 +777,9 @@ function showMapName(name: string) {
   toastTimer = window.setTimeout(() => { mapToast.style.opacity = '0'; }, 1600);
 }
 
-function loadMap(i: number) {
+async function loadMap(i: number) {
+  if (mapLoading) return;            // не запускать загрузку поверх загрузки
+  mapLoading = true;
   // выгрузка прошлой карты
   for (const m of levelMeshes) if (!m.isDisposed()) m.dispose();
   for (const d of doors) d.hinge.dispose(true);
@@ -758,10 +789,12 @@ function loadMap(i: number) {
   mapGen++; // отменяем отложенные респавны прошлой карты
   // сборка новой
   curMap = ((i % mapDefs.length) + mapDefs.length) % mapDefs.length;
+  showMapName('Загрузка: ' + mapDefs[curMap].name + '…');
   const meshes: B.AbstractMesh[] = [];
   sink = meshes;
-  const spawn = mapDefs[curMap].build();
-  sink = null;
+  let spawn: B.Vector3;
+  try { spawn = await mapDefs[curMap].build(); }
+  finally { sink = null; mapLoading = false; }
   levelMeshes = meshes;
   // сброс состояния игры
   kills = 0; collected = 0; pickupTotal = pickups.length; reloading = false;
@@ -770,7 +803,7 @@ function loadMap(i: number) {
   spawnPoint.copyFrom(spawn);
   camera.position.copyFrom(spawn);
   camera.rotation.set(0, 0, 0);
-  velY = 0;
+  velY = 0; onGround = false;
   scene.meshes.forEach((m) => { m.refreshBoundingInfo(); m.computeWorldMatrix(true); });
   showMapName(mapDefs[curMap].name);
 }
