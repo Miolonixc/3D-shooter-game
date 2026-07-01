@@ -215,7 +215,8 @@ function ladderTex(): B.DynamicTexture {
 // зона перед лестницей: пока игрок в footprint'е и ниже topY — держим W = лезть вверх.
 type ClimbZone = { minX: number; maxX: number; minZ: number; maxZ: number; topY: number; exitX: number; exitZ: number };
 const climbZones: ClimbZone[] = [];
-const ladderMetal = mat('ladderMetal', '#9096a0', 0.5);
+const ladderMetal = mat('ladderMetal', '#b23a2c', 0.3); // классический красный cs_assault
+ladderMetal.emissiveColor = new B.Color3(0.18, 0.03, 0.02); // не темнеет в тени стены
 // вертикальная лестница вплотную к стене вдоль оси X: две трубы-стойки + перекладины через
 // равные промежутки. wallZ — плоскость стены, side=-1 если игрок с меньшего z (перед стеной),
 // topY — высота крыши, куда выходит лестница. Меши только визуальные (climb делает физика).
