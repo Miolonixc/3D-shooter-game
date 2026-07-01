@@ -211,6 +211,36 @@ function ladderTex(): B.DynamicTexture {
   return dt;
 }
 
+// --- вертикальные лестницы-трубы (climb) ---
+// зона перед лестницей: пока игрок в footprint'е и ниже topY — держим W = лезть вверх.
+type ClimbZone = { minX: number; maxX: number; minZ: number; maxZ: number; topY: number; exitX: number; exitZ: number };
+const climbZones: ClimbZone[] = [];
+const ladderMetal = mat('ladderMetal', '#9096a0', 0.5);
+// вертикальная лестница вплотную к стене вдоль оси X: две трубы-стойки + перекладины через
+// равные промежутки. wallZ — плоскость стены, side=-1 если игрок с меньшего z (перед стеной),
+// topY — высота крыши, куда выходит лестница. Меши только визуальные (climb делает физика).
+function vLadderX(cx: number, wallZ: number, side: number, topY: number) {
+  const railZ = wallZ + side * 0.12;             // стойки почти касаются стены
+  const rungZ = wallZ + side * 0.24;             // перекладины чуть выступают к игроку
+  const halfW = 0.42, H = topY + 0.6;
+  for (const sx of [-halfW, halfW]) {            // две вертикальные стойки
+    const rail = B.MeshBuilder.CreateCylinder('vlad_rail', { height: H, diameter: 0.11, tessellation: 8 }, scene);
+    rail.position.set(cx + sx, H / 2, railZ);
+    rail.material = ladderMetal; rail.checkCollisions = false; rail.isPickable = false;
+  }
+  for (let y = 0.45; y < topY + 0.3; y += 0.45) { // перекладины на одинаковом расстоянии
+    const rung = B.MeshBuilder.CreateCylinder('vlad_rung', { height: halfW * 2 + 0.12, diameter: 0.07, tessellation: 8 }, scene);
+    rung.rotation.z = Math.PI / 2;               // горизонтально вдоль X
+    rung.position.set(cx, y, rungZ);
+    rung.material = ladderMetal; rung.checkCollisions = false; rung.isPickable = false;
+  }
+  climbZones.push({
+    minX: cx - 0.8, maxX: cx + 0.8,
+    minZ: Math.min(wallZ, wallZ + side * 1.3), maxZ: Math.max(wallZ, wallZ + side * 1.3),
+    topY, exitX: cx, exitZ: wallZ - side * 0.9,   // куда шагнуть на крышу (за стену)
+  });
+}
+
 // одиночная авто-дверь в проёме стены. alongX — дверь поперёк X (южная/северная стена),
 // иначе поперёк Z (восточная/западная стена). Петля у края проёма.
 function doorAt(cx: number, cz: number, width: number, height: number, alongX: boolean) {
@@ -724,7 +754,34 @@ scene.onBeforeRenderObservable.add(() => {
   const downRay = new B.Ray(camera.position, new B.Vector3(0, -1, 0), 60);
   const g = scene.pickWithRay(downRay, (m) => (m.checkCollisions || (m.metadata && m.metadata.floor)) && targets.indexOf(m as B.Mesh) === -1);
   const floorY = (g && g.hit && g.pickedPoint) ? g.pickedPoint.y : -1e9;
-  if (onGround) {
+
+  // --- вертикальные лестницы: подъём в зоне лестницы (W = вверх, S = вниз) ---
+  let onLadder = false;
+  for (const L of climbZones) {
+    if (camera.position.x > L.minX && camera.position.x < L.maxX &&
+        camera.position.z > L.minZ && camera.position.z < L.maxZ &&
+        camera.position.y - eyeNow < L.topY + 0.3) {
+      onLadder = true; velY = 0; onGround = false;
+      const up = ((held.has('KeyW') ? 1 : 0) - (held.has('KeyS') ? 1 : 0)) + touchMove.y;
+      const feet = camera.position.y - eyeNow;
+      if (up > 0.05) {
+        if (feet >= L.topY - 0.12) {                 // у вершины — выход на крышу за стену
+          camera.position.set(L.exitX, L.topY + eyeNow, L.exitZ);
+          onLadder = false;                          // дальше обычная физика удержит на уступе
+        } else {
+          camera.position.y = Math.min(camera.position.y + 0.10, L.topY + eyeNow);
+        }
+      } else if (up < -0.05) {                        // спуск, но не ниже пола
+        camera.position.y = Math.max(camera.position.y - 0.10, floorY + eyeNow);
+        if (feet <= floorY + 0.05) onLadder = false;  // сошёл на землю
+      }
+      break;
+    }
+  }
+
+  if (onLadder) {
+    jumpQueued = false;
+  } else if (onGround) {
     // приклеены к полу на текущей высоте глаз (мгновенный присед, ступени/спуски до 1 м)
     if (camera.position.y - eyeNow <= floorY + 1.0) {
       camera.position.y = floorY + eyeNow;
@@ -753,6 +810,7 @@ scene.onBeforeRenderObservable.add(() => {
     if (held.has('ArrowLeft')) camera.rotation.y -= 0.035;
     if (held.has('ArrowRight')) camera.rotation.y += 0.035;
   }
+  if (onLadder) inZ = 0; // на лестнице W/S = вверх/вниз (см. climb выше), а не ход вперёд
   const inMag = Math.hypot(inX, inZ);
   if (inMag > 0.001) {
     if (inMag > 1) { inX /= inMag; inZ /= inMag; } // по диагонали не быстрее
@@ -801,6 +859,7 @@ scene.onBeforeRenderObservable.add(() => {
 let lastBspMinimap: { img: HTMLCanvasElement; bounds: { minX: number; maxX: number; minZ: number; maxZ: number } } | null = null;
 let lastBspYaw = 0; // угол взгляда на спавне (из entity "angle"), т.к. mapDefs.build() возвращает только позицию
 async function buildBspMap(): Promise<B.Vector3> {
+  climbZones.length = 0; // сбросить зоны лестниц предыдущей карты
   const baseUrl = ((import.meta as any).env && (import.meta as any).env.BASE_URL) || './';
   const r = await loadBsp(scene, baseUrl + 'cs_assault.bsp', baseUrl + 'cs_assault.wad', 0.03);
   r.meshes.forEach(reg); // в текущую карту (sink) для выгрузки при смене
@@ -852,6 +911,7 @@ async function buildBspMap(): Promise<B.Vector3> {
   }
   ladderTo(-24.9, 44.2, 'z', 1, 11.3); // на верх коричневого ящика (запад, у контейнеров)
   ladderTo(16, 61.4, 'z', 1, 11.1);    // прежняя лестница (верхний правый угол миникарты)
+  vLadderX(20.6, 13.4, -1, 15.4);      // вертикальная лестница на крышу здания c_bldg4 (уступ c_sidewlk1)
 
   return new B.Vector3(r.spawn.x, r.spawn.y + EYE, r.spawn.z); // камера = точка спавна + рост глаз
 }
