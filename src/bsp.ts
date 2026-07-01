@@ -1,4 +1,16 @@
-import * as B from '@babylonjs/core';
+import {
+  Scene,
+  Vector3,
+  Mesh,
+  VertexData,
+  StandardMaterial,
+  DynamicTexture,
+  RawTexture,
+  Texture,
+  Engine,
+  Color3,
+  Material
+} from '@babylonjs/core';
 import { parseWad, WadTex } from './wad';
 
 // Загрузчик карт GoldSrc/Half-Life (BSP v30) — Counter-Strike 1.6 формат.
@@ -159,16 +171,16 @@ function shade(hex: string, f: number) {
   const b = Math.min(255, (n & 255) * f) | 0;
   return 'rgb(' + r + ',' + g + ',' + b + ')';
 }
-function speckleTex(scene: B.Scene, name: string, base: string, fleck: string) {
-  const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true); // мипмапы — без них тайлинг на полу даёт муар/полосы
+function speckleTex(scene: Scene, name: string, base: string, fleck: string) {
+  const dt = new DynamicTexture(name, { width: 128, height: 128 }, scene, true); // мипмапы — без них тайлинг на полу даёт муар/полосы
   const ctx = dt.getContext() as any;
   ctx.fillStyle = base; ctx.fillRect(0, 0, 128, 128);
   for (let i = 0; i < 700; i++) { ctx.fillStyle = Math.random() < 0.5 ? fleck : base; ctx.fillRect(Math.random() * 128, Math.random() * 128, 2, 2); }
   dt.update();
   return dt;
 }
-function brickTex(scene: B.Scene, name: string, base: string, mortar: string) {
-  const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true);
+function brickTex(scene: Scene, name: string, base: string, mortar: string) {
+  const dt = new DynamicTexture(name, { width: 128, height: 128 }, scene, true);
   const ctx = dt.getContext() as any;
   ctx.fillStyle = mortar; ctx.fillRect(0, 0, 128, 128);
   const bw = 30, bh = 11, gap = 2;
@@ -183,8 +195,8 @@ function brickTex(scene: B.Scene, name: string, base: string, mortar: string) {
   dt.update();
   return dt;
 }
-function tileTex(scene: B.Scene, name: string, base: string, grout: string) {
-  const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true);
+function tileTex(scene: Scene, name: string, base: string, grout: string) {
+  const dt = new DynamicTexture(name, { width: 128, height: 128 }, scene, true);
   const ctx = dt.getContext() as any;
   ctx.fillStyle = grout; ctx.fillRect(0, 0, 128, 128);
   const n = 3, gap = 4, cell = (128 - gap * (n + 1)) / n;
@@ -196,8 +208,8 @@ function tileTex(scene: B.Scene, name: string, base: string, grout: string) {
   return dt;
 }
 // деревянный ящик: горизонтальные доски + диагональные металлические рейки-крепления
-function crateTex(scene: B.Scene, name: string, base: string, dark: string) {
-  const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true);
+function crateTex(scene: Scene, name: string, base: string, dark: string) {
+  const dt = new DynamicTexture(name, { width: 128, height: 128 }, scene, true);
   const ctx = dt.getContext() as any;
   ctx.fillStyle = base; ctx.fillRect(0, 0, 128, 128);
   const plankH = 128 / 4;
@@ -246,42 +258,42 @@ const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' |
   rim: ['#9a9a9e', '#6a6a6e', 'speckle'],
   vehicle: ['#6e6a52', '#4a4738', 'speckle'],
 };
-const procMatCache = new Map<Category, B.Material>();
-function procMaterial(scene: B.Scene, cat: Category): B.Material {
+const procMatCache = new Map<Category, Material>();
+function procMaterial(scene: Scene, cat: Category): Material {
   let m = procMatCache.get(cat);
   if (m) return m;
   const [base, fleck, style] = catColor[cat];
-  const mat = new B.StandardMaterial('proc_' + cat, scene);
+  const mat = new StandardMaterial('proc_' + cat, scene);
   const dt = style === 'crate' ? crateTex(scene, 'pt_' + cat, base, fleck) : style === 'brick' ? brickTex(scene, 'pt_' + cat, base, fleck) : style === 'tile' ? tileTex(scene, 'pt_' + cat, base, fleck) : speckleTex(scene, 'pt_' + cat, base, fleck);
   dt.anisotropicFilteringLevel = 8; // без этого пол под углом даёт муар/полосы
   mat.diffuseTexture = dt;
-  mat.diffuseColor = new B.Color3(1, 1, 1);
-  mat.specularColor = new B.Color3(0.04, 0.04, 0.04);
-  if (cat === 'light') mat.emissiveColor = new B.Color3(0.35, 0.32, 0.2);
+  mat.diffuseColor = new Color3(1, 1, 1);
+  mat.specularColor = new Color3(0.04, 0.04, 0.04);
+  if (cat === 'light') mat.emissiveColor = new Color3(0.35, 0.32, 0.2);
   mat.backFaceCulling = false;
   procMatCache.set(cat, mat);
   return mat;
 }
 
-const wadMatCache = new Map<string, B.Material>();
-function wadTexToMaterial(scene: B.Scene, name: string, tex: WadTex): B.Material {
+const wadMatCache = new Map<string, Material>();
+function wadTexToMaterial(scene: Scene, name: string, tex: WadTex): Material {
   const cached = wadMatCache.get(name);
   if (cached) return cached;
-  const mat = new B.StandardMaterial('wad_' + name, scene);
-  const dt = new B.RawTexture(tex.rgba, tex.width, tex.height, B.Engine.TEXTUREFORMAT_RGBA, scene, true, false, B.Texture.TRILINEAR_SAMPLINGMODE);
-  dt.wrapU = B.Texture.WRAP_ADDRESSMODE; dt.wrapV = B.Texture.WRAP_ADDRESSMODE;
+  const mat = new StandardMaterial('wad_' + name, scene);
+  const dt = new RawTexture(tex.rgba, tex.width, tex.height, Engine.TEXTUREFORMAT_RGBA, scene, true, false, Texture.TRILINEAR_SAMPLINGMODE);
+  dt.wrapU = Texture.WRAP_ADDRESSMODE; dt.wrapV = Texture.WRAP_ADDRESSMODE;
   dt.anisotropicFilteringLevel = 8; // без этого пол/тротуар под углом даёт муар/полосы
   mat.diffuseTexture = dt;
-  mat.diffuseColor = new B.Color3(1, 1, 1);
-  mat.specularColor = new B.Color3(0.04, 0.04, 0.04);
+  mat.diffuseColor = new Color3(1, 1, 1);
+  mat.specularColor = new Color3(0.04, 0.04, 0.04);
   mat.backFaceCulling = false;
   wadMatCache.set(name, mat);
   return mat;
 }
 
-export interface BspResult { meshes: B.Mesh[]; spawn: B.Vector3; spawnYaw: number; minimap: HTMLCanvasElement; bounds: { minX: number; maxX: number; minZ: number; maxZ: number }; }
+export interface BspResult { meshes: Mesh[]; spawn: Vector3; spawnYaw: number; minimap: HTMLCanvasElement; bounds: { minX: number; maxX: number; minZ: number; maxZ: number }; }
 
-export async function loadBsp(scene: B.Scene, bspUrl: string, wadUrl: string | null, scale: number): Promise<BspResult> {
+export async function loadBsp(scene: Scene, bspUrl: string, wadUrl: string | null, scale: number): Promise<BspResult> {
   const key = bspUrl + '@' + scale;
   let data = cache.get(key);
   if (!data) {
@@ -294,15 +306,15 @@ export async function loadBsp(scene: B.Scene, bspUrl: string, wadUrl: string | n
     try { wadTexes = parseWad(await (await fetch(wadUrl)).arrayBuffer()); } catch { /* нет WAD — все текстуры процедурные */ }
   }
 
-  const meshes: B.Mesh[] = [];
+  const meshes: Mesh[] = [];
   for (const g of data.groups) {
-    const mesh = new B.Mesh('bsp_' + g.name, scene);
-    const vd = new B.VertexData();
+    const mesh = new Mesh('bsp_' + g.name, scene);
+    const vd = new VertexData();
     vd.positions = g.positions;
     vd.indices = g.indices;
     vd.uvs = g.uvs;
     const normals: number[] = [];
-    B.VertexData.ComputeNormals(g.positions, g.indices, normals);
+    VertexData.ComputeNormals(g.positions, g.indices, normals);
     vd.normals = normals;
     vd.applyToMesh(mesh);
 
@@ -336,7 +348,7 @@ export async function loadBsp(scene: B.Scene, bspUrl: string, wadUrl: string | n
   const spawnYaw = (90 - data.spawnYaw) * Math.PI / 180;
   return {
     meshes,
-    spawn: new B.Vector3(data.spawn[0], data.spawn[1], data.spawn[2]),
+    spawn: new Vector3(data.spawn[0], data.spawn[1], data.spawn[2]),
     spawnYaw,
     minimap,
     bounds: { minX: data.minX, maxX: data.maxX, minZ: data.minZ, maxZ: data.maxZ },
