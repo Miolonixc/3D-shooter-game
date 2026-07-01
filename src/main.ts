@@ -190,6 +190,27 @@ function ramp(name: string, x: number, y: number, z: number, w: number, d: numbe
   return r;
 }
 
+// текстура-лестница: две боковые стойки + горизонтальная перекладина в тайле, фон прозрачный.
+// vScale задаётся снаружи, чтобы перекладины шли с нужным шагом по длине пандуса.
+function ladderTex(): B.DynamicTexture {
+  const S = 64;
+  const dt = new B.DynamicTexture('ladderTex', { width: S, height: S }, scene, true);
+  const ctx = dt.getContext() as CanvasRenderingContext2D;
+  ctx.clearRect(0, 0, S, S);                              // прозрачный фон (видно стену за лестницей)
+  const rail = '#6d7077', hi = '#a7adb5', rung = '#82868e';
+  ([[6, 15], [49, 58]] as [number, number][]).forEach(([a, b]) => {   // две стойки
+    ctx.fillStyle = rail; ctx.fillRect(a, 0, b - a, S);
+    ctx.fillStyle = hi; ctx.fillRect(a, 0, 2, S);         // блик по левой грани стойки
+  });
+  ctx.fillStyle = rung; ctx.fillRect(15, 25, 34, 11);     // перекладина между стойками
+  ctx.fillStyle = hi; ctx.fillRect(15, 25, 34, 2);
+  dt.update();
+  dt.hasAlpha = true;
+  dt.wrapV = B.Texture.WRAP_ADDRESSMODE;
+  dt.anisotropicFilteringLevel = 8;
+  return dt;
+}
+
 // одиночная авто-дверь в проёме стены. alongX — дверь поперёк X (южная/северная стена),
 // иначе поперёк Z (восточная/западная стена). Петля у края проёма.
 function doorAt(cx: number, cz: number, width: number, height: number, alongX: boolean) {
@@ -781,26 +802,31 @@ async function buildBspMap(): Promise<B.Vector3> {
   wheel(9.2, 8.3); wheel(9.2, 11.4); wheel(14.8, 8.3); wheel(14.8, 11.4);
 
   // --- лестницы на крыши ---
-  const ladderMat = mat('ladder', '#5a5a52', 0.15);
-  // крутой пандус вплотную к краю крыши (edge — координата края по оси axis, fixed — по другой
-  // оси). Верх пандуса ВЫШЕ края (перешагнуть стенку box'а) + плоская площадка, заходящая на
-  // крышу, чтобы шагнуть на неё без зацепа за верхнюю кромку стены.
-  function ladderTo(fixed: number, edge: number, axis: 'x' | 'z', sign: number, roofY: number, width = 3) {
-    const top = roofY + 0.8;              // верх пандуса выше края крыши (перешагнуть стенку)
-    const run = Math.max(3, top * 0.5);   // крутизна ~63°
+  const landMat = mat('ladtop', '#5a5a52', 0.15); landMat.alpha = 0;   // площадка невидима, только для физики
+  // крутой пандус с текстурой-лестницей вплотную к краю крыши (edge — координата края по оси
+  // axis, fixed — по другой оси). Верх пандуса ВЫШЕ края (перешагнуть стенку box'а) + плоская
+  // площадка, заходящая на крышу, чтобы шагнуть на неё без зацепа за верхнюю кромку стены.
+  function ladderTo(fixed: number, edge: number, axis: 'x' | 'z', sign: number, roofY: number, width = 1.9) {
+    const top = roofY + 0.8;                 // верх пандуса выше края крыши (перешагнуть стенку)
+    const run = Math.max(2.6, top * 0.42);   // крутизна ~67°
     const d = Math.hypot(top, run);
+    // своя текстура-лестница на пандус (перекладина каждые ~0.7 м вдоль длины)
+    const lm = new B.StandardMaterial('ladderM', scene);
+    const tex = ladderTex(); tex.uScale = 1; tex.vScale = d / 0.7;
+    lm.diffuseTexture = tex; lm.useAlphaFromDiffuseTexture = true;
+    lm.backFaceCulling = false; lm.specularColor = new B.Color3(0.12, 0.12, 0.12);
     // высокий конец пандуса на ~1.2 ДО края крыши — чтобы к стенке ноги были уже выше её верха
     const rampTop = edge - sign * 1.2;
     const centerAxis = rampTop - sign * run / 2;
     const r = axis === 'z'
-      ? ramp('ladder', fixed, top / 2, centerAxis, width, d, top, run, ladderMat, true, false)
-      : ramp('ladder', centerAxis, top / 2, fixed, width, d, top, run, ladderMat, true, true);
+      ? ramp('ladder', fixed, top / 2, centerAxis, width, d, top, run, lm, true, false)
+      : ramp('ladder', centerAxis, top / 2, fixed, width, d, top, run, lm, true, true);
     if (sign < 0) { if (axis === 'z') r.rotation.x = -r.rotation.x; else r.rotation.z = -r.rotation.z; }
     // плоская площадка на высоте top от вершины пандуса, перекрывает стенку и заходит на крышу
     const landLen = 5, landCenter = rampTop + sign * landLen / 2;
     const land = axis === 'z'
-      ? box('ladtop', fixed, top - 0.15, landCenter, width, 0.3, landLen, ladderMat)
-      : box('ladtop', landCenter, top - 0.15, fixed, landLen, 0.3, width, ladderMat);
+      ? box('ladtop', fixed, top - 0.15, landCenter, width, 0.3, landLen, landMat)
+      : box('ladtop', landCenter, top - 0.15, fixed, landLen, 0.3, width, landMat);
     land.checkCollisions = false; land.metadata = { floor: true };
   }
   ladderTo(-24.9, 44.2, 'z', 1, 11.3); // на верх коричневого ящика (запад, у контейнеров)
