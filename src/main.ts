@@ -631,7 +631,28 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Digit2') switchWeapon(1);
   if (e.code === 'KeyR') reload();
   if (e.code === 'KeyM') loadMap(curMap + 1);
+  if (e.code === 'KeyP') showPos();   // отладка: показать координаты на экране
 });
+
+// отладочный вывод позиции: тост на экране + копирование в буфер (для расстановки лестниц и т.п.)
+function showPos() {
+  const p = camera.position, r = camera.rotation;
+  const txt = `x:${p.x.toFixed(1)}  y:${p.y.toFixed(1)}  z:${p.z.toFixed(1)}   (yaw ${(r.y).toFixed(2)})`;
+  try { navigator.clipboard?.writeText(txt); } catch { /* ignore */ }
+  let el = document.getElementById('posToast');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'posToast';
+    el.style.cssText = 'position:fixed;left:50%;top:38%;transform:translateX(-50%);z-index:9999;'
+      + 'background:rgba(0,0,0,.8);color:#7fff9f;font:700 22px/1.4 monospace;padding:14px 22px;'
+      + 'border-radius:10px;pointer-events:none;white-space:nowrap;';
+    document.body.appendChild(el);
+  }
+  el.textContent = txt;
+  el.style.opacity = '1';
+  clearTimeout((el as any)._t);
+  (el as any)._t = setTimeout(() => { el!.style.opacity = '0'; el!.style.transition = 'opacity .5s'; }, 4000);
+}
 window.addEventListener('keyup', (e) => held.delete(e.code));
 window.addEventListener('blur', () => held.clear()); // не залипать при потере фокуса
 
