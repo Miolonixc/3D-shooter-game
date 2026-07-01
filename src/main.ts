@@ -757,11 +757,13 @@ scene.onBeforeRenderObservable.add(() => {
 // ===== карта из настоящего BSP (Counter-Strike cs_assault) =====
 // сюда buildBspMap кладёт запечённую миникарту+bounds, чтобы loadMap применил их к mmBg/mmCenter/mmSpan
 let lastBspMinimap: { img: HTMLCanvasElement; bounds: { minX: number; maxX: number; minZ: number; maxZ: number } } | null = null;
+let lastBspYaw = 0; // угол взгляда на спавне (из entity "angle"), т.к. mapDefs.build() возвращает только позицию
 async function buildBspMap(): Promise<B.Vector3> {
   const baseUrl = ((import.meta as any).env && (import.meta as any).env.BASE_URL) || './';
   const r = await loadBsp(scene, baseUrl + 'cs_assault.bsp', baseUrl + 'cs_assault.wad', 0.03);
   r.meshes.forEach(reg); // в текущую карту (sink) для выгрузки при смене
   lastBspMinimap = { img: r.minimap, bounds: r.bounds };
+  lastBspYaw = r.spawnYaw;
   return new B.Vector3(r.spawn.x, r.spawn.y + EYE, r.spawn.z); // камера = точка спавна + рост глаз
 }
 
@@ -820,7 +822,7 @@ async function loadMap(i: number) {
   // спавн + корректный мировой bbox (Babylon обновляет его лениво — иначе стрельба/опора мажут)
   spawnPoint.copyFrom(spawn);
   camera.position.copyFrom(spawn);
-  camera.rotation.set(0, 0, 0);
+  camera.rotation.set(0, curMap === 0 ? lastBspYaw : 0, 0); // BSP: смотрим туда, куда указывает info_player_start
   velY = 0; onGround = false;
   scene.meshes.forEach((m) => { m.refreshBoundingInfo(); m.computeWorldMatrix(true); });
   showMapName(mapDefs[curMap].name);
