@@ -195,8 +195,26 @@ function tileTex(scene: B.Scene, name: string, base: string, grout: string) {
   dt.update();
   return dt;
 }
+// деревянный ящик: горизонтальные доски + диагональные металлические рейки-крепления
+function crateTex(scene: B.Scene, name: string, base: string, dark: string) {
+  const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true);
+  const ctx = dt.getContext() as any;
+  ctx.fillStyle = base; ctx.fillRect(0, 0, 128, 128);
+  const plankH = 128 / 4;
+  for (let i = 0; i < 4; i++) {
+    ctx.fillStyle = shade(base, 0.85 + Math.random() * 0.3);
+    ctx.fillRect(0, i * plankH + 1, 128, plankH - 2);
+  }
+  ctx.strokeStyle = dark; ctx.lineWidth = 2;
+  for (let i = 1; i < 4; i++) { ctx.beginPath(); ctx.moveTo(0, i * plankH); ctx.lineTo(128, i * plankH); ctx.stroke(); }
+  ctx.lineWidth = 7;
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(128, 128); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(128, 0); ctx.lineTo(0, 128); ctx.stroke();
+  dt.update();
+  return dt;
+}
 
-type Category = 'concrete' | 'brick' | 'metal' | 'wood' | 'floor' | 'glass' | 'light' | 'grass' | 'generic';
+type Category = 'concrete' | 'brick' | 'metal' | 'wood' | 'crate' | 'floor' | 'glass' | 'light' | 'grass' | 'generic' | 'tire' | 'rim' | 'vehicle';
 function categorize(name: string): Category {
   const n = name.toLowerCase().replace(/^[-+]\d*~?/, '');
   if (/glass|glu|window|wndow/.test(n)) return 'glass';
@@ -204,21 +222,29 @@ function categorize(name: string): Category {
   if (/grss|grass/.test(n)) return 'grass';
   if (/flr|floor|sidewlk|labflr/.test(n)) return 'floor';
   if (/brck|brick|stone|rockwall/.test(n)) return 'brick';
-  if (/crate|wood|wd\b/.test(n)) return 'wood';
+  if (/crate|xcrate/.test(n)) return 'crate';
+  if (/^trk_(tire|tread)/.test(n)) return 'tire';
+  if (/^trk_rim/.test(n)) return 'rim';
+  if (/^trk_/.test(n)) return 'vehicle';
+  if (/wood|wd\b/.test(n)) return 'wood';
   if (/metal|mtl|drkmtl|door|dr\d|vent|container|silo|trim/.test(n)) return 'metal';
   if (/ccrete|concrete|conc|tnnl|cement|wall/.test(n)) return 'concrete';
   return 'generic';
 }
-const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile']> = {
+const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' | 'crate']> = {
   concrete: ['#9a9a94', '#6f6f68', 'speckle'],
   brick: ['#a3663f', '#3d2a20', 'brick'],
   metal: ['#4d5158', '#2a2d32', 'speckle'],
   wood: ['#8a6541', '#4a3520', 'brick'],
+  crate: ['#9c703f', '#5a3d20', 'crate'],
   floor: ['#8c8c86', '#4a4a44', 'tile'],
   glass: ['#7fa7c2', '#5c7f96', 'speckle'],
   light: ['#e8e2b8', '#c9c090', 'speckle'],
   grass: ['#5c7a45', '#3c5530', 'speckle'],
   generic: ['#8a8a84', '#5a5a54', 'speckle'],
+  tire: ['#232323', '#141414', 'speckle'],
+  rim: ['#9a9a9e', '#6a6a6e', 'speckle'],
+  vehicle: ['#6e6a52', '#4a4738', 'speckle'],
 };
 const procMatCache = new Map<Category, B.Material>();
 function procMaterial(scene: B.Scene, cat: Category): B.Material {
@@ -226,7 +252,7 @@ function procMaterial(scene: B.Scene, cat: Category): B.Material {
   if (m) return m;
   const [base, fleck, style] = catColor[cat];
   const mat = new B.StandardMaterial('proc_' + cat, scene);
-  const dt = style === 'brick' ? brickTex(scene, 'pt_' + cat, base, fleck) : style === 'tile' ? tileTex(scene, 'pt_' + cat, base, fleck) : speckleTex(scene, 'pt_' + cat, base, fleck);
+  const dt = style === 'crate' ? crateTex(scene, 'pt_' + cat, base, fleck) : style === 'brick' ? brickTex(scene, 'pt_' + cat, base, fleck) : style === 'tile' ? tileTex(scene, 'pt_' + cat, base, fleck) : speckleTex(scene, 'pt_' + cat, base, fleck);
   dt.anisotropicFilteringLevel = 8; // без этого пол под углом даёт муар/полосы
   mat.diffuseTexture = dt;
   mat.diffuseColor = new B.Color3(1, 1, 1);

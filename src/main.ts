@@ -764,6 +764,33 @@ async function buildBspMap(): Promise<B.Vector3> {
   r.meshes.forEach(reg); // в текущую карту (sink) для выгрузки при смене
   lastBspMinimap = { img: r.minimap, bounds: r.bounds };
   lastBspYaw = r.spawnYaw;
+
+  // --- колёса грузовика: в мире BSP нет геометрии шин (только текстуры trk_tire/trk_rim
+  // без реальных граней), поэтому грузовик визуально «висит в воздухе» — добавляем колёса
+  const wheelMat = mat('wheel', '#1c1c1c', 0.1);
+  const rimMat = mat('rim', '#9a9a9e', 0.3);
+  function wheel(x: number, z: number) {
+    const rad = 0.55;
+    const tire = B.MeshBuilder.CreateCylinder('wheel', { diameter: rad * 2, height: 0.35 }, scene);
+    tire.rotation.z = Math.PI / 2; tire.position.set(x, rad, z); tire.material = wheelMat; tire.isPickable = false;
+    reg(tire);
+    const rim = B.MeshBuilder.CreateCylinder('rim', { diameter: rad * 1.1, height: 0.37 }, scene);
+    rim.rotation.z = Math.PI / 2; rim.position.set(x, rad, z); rim.material = rimMat; rim.isPickable = false;
+    reg(rim);
+  }
+  wheel(9.2, 8.3); wheel(9.2, 11.4); wheel(14.8, 8.3); wheel(14.8, 11.4);
+
+  // --- лестницы на крыши (крутые пандусы) в трёх местах карты ---
+  const ladderMat = mat('ladder', '#5a5a52', 0.15);
+  function addLadder(x: number, z: number, targetY: number, alongXaxis = false) {
+    const run = Math.max(2, targetY / 2.2);
+    const d = Math.hypot(targetY, run);
+    ramp('ladder', x, targetY / 2, z, 2.6, d, targetY, run, ladderMat, true, alongXaxis);
+  }
+  addLadder(-30, 32, 8);  // ангар у контейнеров/ящика (реальный проход в этом месте — x=-30)
+  addLadder(16, 64, 11);  // другая сторона (на миникарте — верхний правый угол)
+  addLadder(18, 9, 9);    // угол здания рядом с грузовиком
+
   return new B.Vector3(r.spawn.x, r.spawn.y + EYE, r.spawn.z); // камера = точка спавна + рост глаз
 }
 
