@@ -343,24 +343,30 @@ function objHud() { objEl.textContent = '🧊 Собрано: ' + collected + ' 
 objHud();
 
 // --- миникарта (вид сверху) ---
-const MM = 168, MMHALF = MM / 2, MM_SPAN = 100; // мир ±50 → весь размер карты
+const MM = 168, MMHALF = MM / 2, MM_SPAN = 100; // мир ±50 → весь размер карты (карты-конструкторы)
+let mmCenterX = 0, mmCenterZ = 0, mmSpan = MM_SPAN; // для BSP-карты подменяются по её bounds
+let mmBg: HTMLCanvasElement | null = null;          // запечённый силуэт BSP-геометрии (или null — рисуем сами)
 const mmCanvas = document.createElement('canvas');
 mmCanvas.width = MM; mmCanvas.height = MM;
 Object.assign(mmCanvas.style, { position: 'fixed', top: '14px', right: '14px', borderRadius: '8px', border: '2px solid rgba(255,255,255,.35)', zIndex: '4', pointerEvents: 'none' } as any);
 document.body.appendChild(mmCanvas);
 const mmctx = mmCanvas.getContext('2d')!;
-// мир (x вправо, z вперёд) → канвас (x вправо, z вверх)
-function w2m(x: number, z: number): [number, number] { return [MMHALF + (x / MM_SPAN) * MM, MMHALF - (z / MM_SPAN) * MM]; }
+// мир (x вправо, z вперёд) → канвас (x вправо, z вверх), с учётом центра/масштаба текущей карты
+function w2m(x: number, z: number): [number, number] { return [MMHALF + ((x - mmCenterX) / mmSpan) * MM, MMHALF - ((z - mmCenterZ) / mmSpan) * MM]; }
 function drawMinimap() {
   mmctx.clearRect(0, 0, MM, MM);
-  mmctx.fillStyle = 'rgba(10,14,18,.55)'; mmctx.fillRect(0, 0, MM, MM);
-  // граница карты (±42)
-  const a = w2m(-42, 42), b = w2m(42, -42);
-  mmctx.strokeStyle = 'rgba(255,255,255,.5)'; mmctx.lineWidth = 1.5;
-  mmctx.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
-  // здания
-  mmctx.fillStyle = 'rgba(150,160,170,.55)';
-  for (const f of footprints) { const tl = w2m(f.cx - f.w / 2, f.cz + f.d / 2); mmctx.fillRect(tl[0], tl[1], (f.w / MM_SPAN) * MM, (f.d / MM_SPAN) * MM); }
+  if (mmBg) {
+    mmctx.drawImage(mmBg, 0, 0, MM, MM); // запечённый силуэт геометрии (BSP)
+  } else {
+    mmctx.fillStyle = 'rgba(10,14,18,.55)'; mmctx.fillRect(0, 0, MM, MM);
+    // граница карты
+    const a = w2m(-42, 42), b = w2m(42, -42);
+    mmctx.strokeStyle = 'rgba(255,255,255,.5)'; mmctx.lineWidth = 1.5;
+    mmctx.strokeRect(a[0], a[1], b[0] - a[0], b[1] - a[1]);
+    // здания
+    mmctx.fillStyle = 'rgba(150,160,170,.55)';
+    for (const f of footprints) { const tl = w2m(f.cx - f.w / 2, f.cz + f.d / 2); mmctx.fillRect(tl[0], tl[1], (f.w / mmSpan) * MM, (f.d / mmSpan) * MM); }
+  }
   // мишени
   mmctx.fillStyle = '#e64545';
   for (const t of targets) { const p = w2m(t.position.x, t.position.z); mmctx.beginPath(); mmctx.arc(p[0], p[1], 2.6, 0, 7); mmctx.fill(); }
@@ -749,10 +755,13 @@ scene.onBeforeRenderObservable.add(() => {
 });
 
 // ===== карта из настоящего BSP (Counter-Strike cs_assault) =====
+// сюда buildBspMap кладёт запечённую миникарту+bounds, чтобы loadMap применил их к mmBg/mmCenter/mmSpan
+let lastBspMinimap: { img: HTMLCanvasElement; bounds: { minX: number; maxX: number; minZ: number; maxZ: number } } | null = null;
 async function buildBspMap(): Promise<B.Vector3> {
   const baseUrl = ((import.meta as any).env && (import.meta as any).env.BASE_URL) || './';
-  const r = await loadBsp(scene, baseUrl + 'cs_assault.bsp', 0.03);
-  reg(r.mesh); // в текущую карту (sink) для выгрузки при смене
+  const r = await loadBsp(scene, baseUrl + 'cs_assault.bsp', baseUrl + 'cs_assault.wad', 0.03);
+  r.meshes.forEach(reg); // в текущую карту (sink) для выгрузки при смене
+  lastBspMinimap = { img: r.minimap, bounds: r.bounds };
   return new B.Vector3(r.spawn.x, r.spawn.y + EYE, r.spawn.z); // камера = точка спавна + рост глаз
 }
 
@@ -796,6 +805,15 @@ async function loadMap(i: number) {
   try { spawn = await mapDefs[curMap].build(); }
   finally { sink = null; mapLoading = false; }
   levelMeshes = meshes;
+  // миникарта: у BSP — запечённый силуэт с его bounds, у остальных — обычный конструктор с фиксированным span
+  if (curMap === 0 && lastBspMinimap) {
+    mmBg = lastBspMinimap.img;
+    const b = lastBspMinimap.bounds;
+    mmCenterX = (b.minX + b.maxX) / 2; mmCenterZ = (b.minZ + b.maxZ) / 2;
+    mmSpan = Math.max(b.maxX - b.minX, b.maxZ - b.minZ) * 1.04; // те же 1.04, что и при запекании
+  } else {
+    mmBg = null; mmCenterX = 0; mmCenterZ = 0; mmSpan = MM_SPAN;
+  }
   // сброс состояния игры
   kills = 0; collected = 0; pickupTotal = pickups.length; reloading = false;
   hud(); objHud();
@@ -814,4 +832,4 @@ engine.runRenderLoop(() => scene.render());
 window.addEventListener('resize', () => engine.resize());
 
 // отладка
-(window as any).GAME = { engine, scene, camera, targets, pickups, weapons, fire, switchWeapon, getCur: () => cur, held, footprints, w2m, drawMinimap, MM, MMHALF, MM_SPAN, loadMap, mapDefs, getMap: () => curMap };
+(window as any).GAME = { engine, scene, camera, targets, pickups, weapons, fire, switchWeapon, getCur: () => cur, held, footprints, w2m, drawMinimap, MM, MMHALF, MM_SPAN, loadMap, mapDefs, getMap: () => curMap, getMmCenterX: () => mmCenterX, getMmCenterZ: () => mmCenterZ, getMmSpan: () => mmSpan, getBspBounds: () => lastBspMinimap && lastBspMinimap.bounds, mmCanvas };
