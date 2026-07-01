@@ -213,28 +213,62 @@ function crateTex(scene: B.Scene, name: string, base: string, dark: string) {
   dt.update();
   return dt;
 }
+// вентиляция: металл с горизонтальными жалюзи + рамка
+function ventTex(scene: B.Scene, name: string, base: string, dark: string) {
+  const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true);
+  const ctx = dt.getContext() as any;
+  ctx.fillStyle = base; ctx.fillRect(0, 0, 128, 128);
+  ctx.fillStyle = dark;
+  for (let y = 5; y < 124; y += 11) ctx.fillRect(6, y, 116, 6);        // жалюзи
+  ctx.fillStyle = shade(base, 1.15);
+  for (let y = 3; y < 124; y += 11) ctx.fillRect(6, y, 116, 2);        // блик над каждой планкой
+  ctx.strokeStyle = shade(base, 0.55); ctx.lineWidth = 5; ctx.strokeRect(3, 3, 122, 122); // рамка
+  dt.update();
+  return dt;
+}
+// кабинет/консоль: панельная сетка + тёмные «экраны» + индикаторы
+function officeTex(scene: B.Scene, name: string, base: string, dark: string) {
+  const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true);
+  const ctx = dt.getContext() as any;
+  ctx.fillStyle = base; ctx.fillRect(0, 0, 128, 128);
+  ctx.strokeStyle = shade(base, 0.7); ctx.lineWidth = 2;
+  for (let x = 0; x <= 128; x += 32) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 128); ctx.stroke(); }
+  for (let y = 0; y <= 128; y += 43) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(128, y); ctx.stroke(); }
+  ctx.fillStyle = dark;
+  for (let i = 0; i < 4; i++) ctx.fillRect(6 + (i % 2) * 64, 6 + ((i / 2) | 0) * 64, 52, 30); // экраны
+  ctx.fillStyle = '#5fd06a';
+  for (let i = 0; i < 8; i++) ctx.fillRect(10 + (i % 4) * 28, 40 + ((i / 4) | 0) * 64, 4, 4);  // индикаторы
+  dt.update();
+  return dt;
+}
 
-type Category = 'concrete' | 'brick' | 'metal' | 'wood' | 'crate' | 'floor' | 'glass' | 'light' | 'grass' | 'generic' | 'tire' | 'rim' | 'vehicle';
+type Category = 'concrete' | 'asphalt' | 'brick' | 'metal' | 'vent' | 'office' | 'wood' | 'crate' | 'floor' | 'glass' | 'light' | 'grass' | 'generic' | 'tire' | 'rim' | 'vehicle';
 function categorize(name: string): Category {
   const n = name.toLowerCase().replace(/^[-+]\d*~?/, '');
   if (/glass|glu|window|wndow/.test(n)) return 'glass';
-  if (/light|neon|lgt|viewscreen|sign|pow\b/.test(n)) return 'light';
+  if (/light|neon|lgt|pow\b/.test(n)) return 'light';
   if (/grss|grass/.test(n)) return 'grass';
-  if (/flr|floor|sidewlk|labflr/.test(n)) return 'floor';
-  if (/brck|brick|stone|rockwall/.test(n)) return 'brick';
+  if (/duct|vnt|vent|pfab|galv|grille/.test(n)) return 'vent';        // система вентиляции
+  if (/comp\d|generic\d|recharged|viewscreen|dsk|desk|babtech|fifties|introdr|secdr|tankrear|silo/.test(n)) return 'office'; // кабинет/консоли/шкафы
   if (/crate|xcrate/.test(n)) return 'crate';
   if (/^trk_(tire|tread)/.test(n)) return 'tire';
   if (/^trk_rim/.test(n)) return 'rim';
   if (/^trk_/.test(n)) return 'vehicle';
+  if (/tnnl_flr|labflr|duct_flr|crete4_flr|_flr\d/.test(n)) return 'asphalt'; // пол-асфальт (вход/туннель внутри ангара)
+  if (/flr|floor/.test(n)) return 'floor';
+  if (/brck|brick|stone|rockwall/.test(n)) return 'brick';
   if (/wood|wd\b/.test(n)) return 'wood';
-  if (/metal|mtl|drkmtl|door|dr\d|vent|container|silo|trim/.test(n)) return 'metal';
-  if (/ccrete|concrete|conc|tnnl|cement|wall/.test(n)) return 'concrete';
+  if (/metal|mtl|drkmtl|door|dr\d|trim/.test(n)) return 'metal';
+  if (/ccrete|concrete|conc|tnnl|cement|wall|crete|comp|lab|c1a|c2a|c3a/.test(n)) return 'concrete';
   return 'generic';
 }
-const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' | 'crate']> = {
+const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' | 'crate' | 'vent' | 'office']> = {
   concrete: ['#9a9a94', '#6f6f68', 'speckle'],
+  asphalt: ['#40444a', '#2c2f34', 'speckle'],   // тёмный асфальт (вход/туннель, как мост снаружи)
   brick: ['#a3663f', '#3d2a20', 'brick'],
   metal: ['#4d5158', '#2a2d32', 'speckle'],
+  vent: ['#5c6068', '#33363c', 'vent'],          // вентиляция — жалюзи
+  office: ['#6b6f77', '#22252b', 'office'],       // кабинет — консольные панели
   wood: ['#8a6541', '#4a3520', 'brick'],
   crate: ['#9c703f', '#5a3d20', 'crate'],
   floor: ['#8c8c86', '#4a4a44', 'tile'],
@@ -252,7 +286,12 @@ function procMaterial(scene: B.Scene, cat: Category): B.Material {
   if (m) return m;
   const [base, fleck, style] = catColor[cat];
   const mat = new B.StandardMaterial('proc_' + cat, scene);
-  const dt = style === 'crate' ? crateTex(scene, 'pt_' + cat, base, fleck) : style === 'brick' ? brickTex(scene, 'pt_' + cat, base, fleck) : style === 'tile' ? tileTex(scene, 'pt_' + cat, base, fleck) : speckleTex(scene, 'pt_' + cat, base, fleck);
+  const dt = style === 'crate' ? crateTex(scene, 'pt_' + cat, base, fleck)
+    : style === 'vent' ? ventTex(scene, 'pt_' + cat, base, fleck)
+    : style === 'office' ? officeTex(scene, 'pt_' + cat, base, fleck)
+    : style === 'brick' ? brickTex(scene, 'pt_' + cat, base, fleck)
+    : style === 'tile' ? tileTex(scene, 'pt_' + cat, base, fleck)
+    : speckleTex(scene, 'pt_' + cat, base, fleck);
   dt.anisotropicFilteringLevel = 8; // без этого пол под углом даёт муар/полосы
   mat.diffuseTexture = dt;
   mat.diffuseColor = new B.Color3(1, 1, 1);
