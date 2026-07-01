@@ -235,9 +235,11 @@ function officeTex(scene: B.Scene, name: string, base: string, dark: string) {
   for (let x = 0; x <= 128; x += 32) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 128); ctx.stroke(); }
   for (let y = 0; y <= 128; y += 43) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(128, y); ctx.stroke(); }
   ctx.fillStyle = dark;
-  for (let i = 0; i < 4; i++) ctx.fillRect(6 + (i % 2) * 64, 6 + ((i / 2) | 0) * 64, 52, 30); // экраны
-  ctx.fillStyle = '#5fd06a';
-  for (let i = 0; i < 8; i++) ctx.fillRect(10 + (i % 4) * 28, 40 + ((i / 4) | 0) * 64, 4, 4);  // индикаторы
+  for (let i = 0; i < 4; i++) ctx.fillRect(6 + (i % 2) * 64, 6 + ((i / 2) | 0) * 64, 52, 30); // корпуса экранов
+  const screens = ['#1c3f63', '#123f2c', '#432033', '#2a3f14']; // синий/зелёный/пурпур/жёлтый мониторы
+  for (let i = 0; i < 4; i++) { ctx.fillStyle = screens[i]; ctx.fillRect(9 + (i % 2) * 64, 9 + ((i / 2) | 0) * 64, 46, 22); }
+  const ind = ['#5fd06a', '#e8b53c', '#e0503c', '#4fa6e6']; // разноцветные индикаторы
+  for (let i = 0; i < 8; i++) { ctx.fillStyle = ind[i % 4]; ctx.fillRect(10 + (i % 4) * 28, 40 + ((i / 4) | 0) * 64, 5, 5); }
   dt.update();
   return dt;
 }
@@ -254,7 +256,7 @@ function categorize(name: string): Category {
   if (/^trk_(tire|tread)/.test(n)) return 'tire';
   if (/^trk_rim/.test(n)) return 'rim';
   if (/^trk_/.test(n)) return 'vehicle';
-  if (/tnnl_flr|labflr|duct_flr|crete4_flr|_flr\d/.test(n)) return 'asphalt'; // пол-асфальт (вход/туннель внутри ангара)
+  if (/tnnl_flr|labflr|duct_flr|crete4_flr|_flr\d|out_pave/.test(n)) return 'asphalt'; // асфальт: двор-дорога снаружи + вход/туннель внутри
   if (/flr|floor/.test(n)) return 'floor';
   if (/brck|brick|stone|rockwall/.test(n)) return 'brick';
   if (/wood|wd\b/.test(n)) return 'wood';
@@ -263,8 +265,8 @@ function categorize(name: string): Category {
   return 'generic';
 }
 const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' | 'crate' | 'vent' | 'office']> = {
-  concrete: ['#9a9a94', '#6f6f68', 'speckle'],
-  asphalt: ['#40444a', '#2c2f34', 'speckle'],   // тёмный асфальт (вход/туннель, как мост снаружи)
+  concrete: ['#9d968a', '#6d675b', 'speckle'], // тёпло-серый бетон (стены зданий/ангара, как в cs_assault)
+  asphalt: ['#474a4e', '#30323a', 'speckle'],   // асфальт: двор-дорога снаружи + вход/туннель
   brick: ['#a3663f', '#3d2a20', 'brick'],
   metal: ['#4d5158', '#2a2d32', 'speckle'],
   vent: ['#5c6068', '#33363c', 'vent'],          // вентиляция — жалюзи
@@ -297,6 +299,8 @@ function procMaterial(scene: B.Scene, cat: Category): B.Material {
   mat.diffuseColor = new B.Color3(1, 1, 1);
   mat.specularColor = new B.Color3(0.04, 0.04, 0.04);
   if (cat === 'light') mat.emissiveColor = new B.Color3(0.35, 0.32, 0.2);
+  if (cat === 'office') { mat.emissiveTexture = dt; mat.emissiveColor = new B.Color3(0.5, 0.5, 0.5); } // экраны/индикаторы светятся в тёмном ангаре
+  if (cat === 'vent') mat.emissiveColor = new B.Color3(0.09, 0.10, 0.12); // лёгкая подсветка металла вентиляции
   mat.backFaceCulling = false;
   procMatCache.set(cat, mat);
   return mat;

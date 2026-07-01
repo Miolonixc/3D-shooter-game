@@ -19,7 +19,7 @@ scene.fogStart = 90; scene.fogEnd = 320;
 // --- свет (день) ---
 const hemi = new B.HemisphericLight('hemi', new B.Vector3(0, 1, 0), scene);
 hemi.intensity = 0.8;
-hemi.groundColor = new B.Color3(0.4, 0.39, 0.36);
+hemi.groundColor = new B.Color3(0.5, 0.49, 0.45); // чуть больше заливки — интерьер ангара не такой тёмный
 const sun = new B.DirectionalLight('sun', new B.Vector3(-0.5, -1, -0.35), scene);
 sun.position = new B.Vector3(50, 90, 40);
 sun.intensity = 0.85;
