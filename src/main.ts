@@ -780,16 +780,31 @@ async function buildBspMap(): Promise<B.Vector3> {
   }
   wheel(9.2, 8.3); wheel(9.2, 11.4); wheel(14.8, 8.3); wheel(14.8, 11.4);
 
-  // --- лестницы на крыши (крутые пандусы) в трёх местах карты ---
+  // --- лестницы на крыши ---
   const ladderMat = mat('ladder', '#5a5a52', 0.15);
-  function addLadder(x: number, z: number, targetY: number, alongXaxis = false) {
-    const run = Math.max(2, targetY / 2.2);
-    const d = Math.hypot(targetY, run);
-    ramp('ladder', x, targetY / 2, z, 2.6, d, targetY, run, ladderMat, true, alongXaxis);
+  // крутой пандус вплотную к краю крыши (edge — координата края по оси axis, fixed — по другой
+  // оси). Верх пандуса ВЫШЕ края (перешагнуть стенку box'а) + плоская площадка, заходящая на
+  // крышу, чтобы шагнуть на неё без зацепа за верхнюю кромку стены.
+  function ladderTo(fixed: number, edge: number, axis: 'x' | 'z', sign: number, roofY: number, width = 3) {
+    const top = roofY + 0.8;              // верх пандуса выше края крыши (перешагнуть стенку)
+    const run = Math.max(3, top * 0.5);   // крутизна ~63°
+    const d = Math.hypot(top, run);
+    // высокий конец пандуса на ~1.2 ДО края крыши — чтобы к стенке ноги были уже выше её верха
+    const rampTop = edge - sign * 1.2;
+    const centerAxis = rampTop - sign * run / 2;
+    const r = axis === 'z'
+      ? ramp('ladder', fixed, top / 2, centerAxis, width, d, top, run, ladderMat, true, false)
+      : ramp('ladder', centerAxis, top / 2, fixed, width, d, top, run, ladderMat, true, true);
+    if (sign < 0) { if (axis === 'z') r.rotation.x = -r.rotation.x; else r.rotation.z = -r.rotation.z; }
+    // плоская площадка на высоте top от вершины пандуса, перекрывает стенку и заходит на крышу
+    const landLen = 5, landCenter = rampTop + sign * landLen / 2;
+    const land = axis === 'z'
+      ? box('ladtop', fixed, top - 0.15, landCenter, width, 0.3, landLen, ladderMat)
+      : box('ladtop', landCenter, top - 0.15, fixed, landLen, 0.3, width, ladderMat);
+    land.checkCollisions = false; land.metadata = { floor: true };
   }
-  addLadder(-30, 32, 8);  // ангар у контейнеров/ящика (реальный проход в этом месте — x=-30)
-  addLadder(16, 64, 11);  // другая сторона (на миникарте — верхний правый угол)
-  addLadder(18, 9, 9);    // угол здания рядом с грузовиком
+  ladderTo(-24.9, 44.2, 'z', 1, 11.3); // на верх коричневого ящика (запад, у контейнеров)
+  ladderTo(16, 61.4, 'z', 1, 11.1);    // прежняя лестница (верхний правый угол миникарты)
 
   return new B.Vector3(r.spawn.x, r.spawn.y + EYE, r.spawn.z); // камера = точка спавна + рост глаз
 }
