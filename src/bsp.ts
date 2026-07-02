@@ -274,6 +274,22 @@ function officeTex(scene: B.Scene, name: string, base: string, dark: string) {
   return dt;
 }
 
+// сетчатый забор: ромбовидная сетка-рабица между верхней и нижней направляющей
+function fenceTex(scene: B.Scene, name: string, base: string, dark: string) {
+  const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true);
+  const ctx = dt.getContext() as any;
+  ctx.fillStyle = base; ctx.fillRect(0, 0, 128, 128);
+  ctx.strokeStyle = dark; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.8;
+  for (let i = -128; i < 256; i += 14) {                      // диагональная сетка-рабица
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + 128, 128); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(i, 128); ctx.lineTo(i + 128, 0); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = shade(base, 0.55);                          // верхняя и нижняя направляющая
+  ctx.fillRect(0, 0, 128, 8); ctx.fillRect(0, 120, 128, 8);
+  dt.update();
+  return dt;
+}
 // мусорный контейнер: ржавый гофрированный металл (вертикальные рёбра) + потёки/пятна
 function dumpsterTex(scene: B.Scene, name: string, base: string, dark: string) {
   const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true);
@@ -329,7 +345,7 @@ function canvasTex(scene: B.Scene, name: string, base: string, dark: string) {
   return dt;
 }
 
-type Category = 'concrete' | 'asphalt' | 'brick' | 'metal' | 'vent' | 'office' | 'wood' | 'crate' | 'floor' | 'glass' | 'light' | 'grass' | 'generic' | 'tire' | 'rim' | 'vehicle' | 'truckbed' | 'canvas' | 'dumpster';
+type Category = 'concrete' | 'asphalt' | 'brick' | 'metal' | 'vent' | 'office' | 'wood' | 'crate' | 'floor' | 'glass' | 'light' | 'grass' | 'generic' | 'tire' | 'rim' | 'vehicle' | 'truckbed' | 'canvas' | 'dumpster' | 'fence' | 'gravel';
 function categorize(name: string): Category {
   const n = name.toLowerCase().replace(/^[-+]\d*~?/, '');
   if (/glass|glu|window|wndow/.test(n)) return 'glass';
@@ -339,6 +355,10 @@ function categorize(name: string): Category {
   if (/comp\d|generic\d|recharged|viewscreen|dsk|desk|babtech|fifties|introdr|secdr|tankrear/.test(n)) return 'office'; // кабинет/консоли/шкафы
   if (/silo/.test(n)) return 'metal'; // стена-силос — гладкий металл (сетка officeTex на ней давала линии)
   if (/dmp/.test(n)) return 'dumpster'; // мусорный контейнер
+  if (/skkylite/.test(n)) return 'light'; // световой люк на крыше ангара
+  if (/out_gravel/.test(n)) return 'gravel'; // гравийная крыша
+  if (/^out_w4$|^out_w5$|^out_w6b$/.test(n)) return 'fence'; // ограждение-рабица у обрыва за мостом
+  if (/^black$/.test(n)) return 'metal'; // граничная стена карты — тёмный нейтральный металл
   if (/crate|xcrate/.test(n)) return 'crate';
   if (/^trk_(tire|tread)/.test(n)) return 'tire';
   if (/^trk_rim/.test(n)) return 'rim';
@@ -353,7 +373,7 @@ function categorize(name: string): Category {
   if (/ccrete|concrete|conc|tnnl|cement|wall|crete|comp|lab|c1a|c2a|c3a/.test(n)) return 'concrete';
   return 'generic';
 }
-const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' | 'crate' | 'vent' | 'office' | 'asphalt' | 'truckbed' | 'canvas' | 'dumpster']> = {
+const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' | 'crate' | 'vent' | 'office' | 'asphalt' | 'truckbed' | 'canvas' | 'dumpster' | 'fence']> = {
   concrete: ['#9d968a', '#6d675b', 'speckle'], // тёпло-серый бетон (стены зданий/ангара, как в cs_assault)
   asphalt: ['#474a4e', '#30323a', 'asphalt'],   // асфальт: гладкий, без полос-штрихов под углом
   brick: ['#a3663f', '#3d2a20', 'brick'],
@@ -371,6 +391,8 @@ const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' |
   rim: ['#9a9a9e', '#6a6a6e', 'speckle'],
   vehicle: ['#6e6a52', '#4a4738', 'speckle'],
   truckbed: ['#4f524f', '#2b2d2b', 'truckbed'], // рифлёный металлический пол кузова
+  fence: ['#6a6e64', '#3a3d36', 'fence'],        // сетка-рабица, тёмно-оливковый металл
+  gravel: ['#a8a49a', '#7a766c', 'speckle'],      // гравийная крыша — светло-серая, крупнее зерно
   canvas: ['#8a835f', '#5c5640', 'canvas'],      // брезентовый тент кузова
   dumpster: ['#3c5943', '#1c2620', 'dumpster'],  // мусорный контейнер — тёмно-зелёный ржавый металл
 };
@@ -385,6 +407,7 @@ function procMaterial(scene: B.Scene, cat: Category): B.Material {
     : style === 'truckbed' ? truckbedTex(scene, 'pt_' + cat, base, fleck)
     : style === 'canvas' ? canvasTex(scene, 'pt_' + cat, base, fleck)
     : style === 'dumpster' ? dumpsterTex(scene, 'pt_' + cat, base, fleck)
+    : style === 'fence' ? fenceTex(scene, 'pt_' + cat, base, fleck)
     : style === 'vent' ? ventTex(scene, 'pt_' + cat, base, fleck)
     : style === 'office' ? officeTex(scene, 'pt_' + cat, base, fleck)
     : style === 'brick' ? brickTex(scene, 'pt_' + cat, base, fleck)
