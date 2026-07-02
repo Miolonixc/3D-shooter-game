@@ -181,15 +181,17 @@ function asphaltTex(scene: B.Scene, name: string, base: string, _dark: string) {
   return dt;
 }
 function speckleTex(scene: B.Scene, name: string, base: string, fleck: string) {
-  // как asphaltTex: крупные мягкие пятна вместо мелкого зерна — 2px-точки на больших
-  // поверхностях под скользящим углом дают длинные тёмные линии-штрихи (анизотропия)
+  // деликатное зерно НИЗКОГО контраста: высококонтрастные 2px-точки под скользящим углом
+  // давали линии-штрихи (анизотропия), а крупные пятна растягивались по UV в «подтёки».
+  // Мелкие точки с малой альфой дают ровную фактуру без обоих артефактов.
   const dt = new B.DynamicTexture(name, { width: 256, height: 256 }, scene, true);
   const ctx = dt.getContext() as any;
   ctx.fillStyle = base; ctx.fillRect(0, 0, 256, 256);
-  ctx.globalAlpha = 0.22;
-  for (let i = 0; i < 70; i++) {
-    ctx.fillStyle = Math.random() < 0.5 ? fleck : shade(base, 1.07);
-    ctx.beginPath(); ctx.arc(Math.random() * 256, Math.random() * 256, 7 + Math.random() * 16, 0, 7); ctx.fill();
+  ctx.globalAlpha = 0.10;
+  for (let i = 0; i < 900; i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? fleck : shade(base, 1.12);
+    const r = 1.5 + Math.random() * 2.5;
+    ctx.beginPath(); ctx.arc(Math.random() * 256, Math.random() * 256, r, 0, 7); ctx.fill();
   }
   ctx.globalAlpha = 1;
   dt.update();
