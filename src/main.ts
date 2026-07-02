@@ -886,6 +886,46 @@ async function buildBspMap(): Promise<B.Vector3> {
   // открытый обрыв без пола, и игрок проваливался под карту, пятясь назад от контейнеров.
   solidBox('void_barrier_west', -57.6, 8, 30, 0.6, 26, 130);
 
+  // --- видеонаблюдение: 3 статичные камеры → RenderTargetTexture → экраны в кузове ---
+  function cctvCamera(name: string, px: number, py: number, pz: number, tx: number, ty: number, tz: number) {
+    const cam = new B.UniversalCamera(name, new B.Vector3(px, py, pz), scene);
+    cam.setTarget(new B.Vector3(tx, ty, tz));
+    cam.minZ = 0.1; cam.maxZ = 150; cam.fov = 1.0;
+    const rtt = new B.RenderTargetTexture(name + '_rtt', 256, scene, false);
+    rtt.activeCamera = cam;
+    rtt.renderList = scene.meshes; // тот же мир, что и в основном виде
+    scene.customRenderTargets.push(rtt);
+    cctvRigs.push({ cam, rtt });
+    return rtt;
+  }
+  const rttGate = cctvCamera('cctvGate', 8, 5, 51, 8, 3, 90);          // вход со стороны моста (гаражные ворота)
+  const rttUpper = cctvCamera('cctvUpper', 28, 17.6, 20, 18, 15.8, 10); // крыша здания (верхний уровень)
+  const rttExit = cctvCamera('cctvExit', 5, 10, 78, 11.5, 10.1, 86.6); // выход из ангара (дверь+лестница)
+
+  // Экраны на крыше кузова, рядом с антенной. Внутри кузова (под тентом) не вышло: тент —
+  // это скатная крыша-домиком, а не сплошные борта (по бокам открыто наружу), а нижняя часть
+  // кузова забита декоративным реквизитом соседней лаборатории (recharged/lab1_comp*) — надёжного
+  // непересекающегося места под 3 монитора там нет. Крыша — проверенно чистая (стоять уже можно).
+  function cctvScreen(x: number, y: number, z: number, rtt: B.RenderTargetTexture) {
+    const p = B.MeshBuilder.CreatePlane('cctvScreen', { width: 1.1, height: 0.85 }, scene);
+    p.position.set(x, y, z); // нормаль +Z по умолчанию — на открытую сторону крыши (там же антенна)
+    const m = new B.StandardMaterial('cctvScreenMat', scene);
+    m.emissiveTexture = rtt; m.diffuseColor = new B.Color3(0, 0, 0); m.specularColor = new B.Color3(0, 0, 0);
+    m.backFaceCulling = false;
+    p.material = m; p.checkCollisions = false; p.isPickable = false;
+    reg(p);
+  }
+  cctvScreen(11, 3.85, 8.6, rttGate);
+  cctvScreen(12.6, 3.85, 8.6, rttUpper);
+  cctvScreen(14.2, 3.85, 8.6, rttExit);
+
+  // спутниковая антенна на крыше кузова (декоративная — обоснование для камер)
+  const antMat = mat('antenna', '#c9cbce', 0.3);
+  const mast = B.MeshBuilder.CreateCylinder('antMast', { diameter: 0.08, height: 1.1 }, scene);
+  mast.position.set(9.4, 3.95, 8.2); mast.material = antMat; mast.isPickable = false; reg(mast);
+  const dish = B.MeshBuilder.CreateCylinder('antDish', { diameterTop: 0.05, diameterBottom: 0.7, height: 0.28, tessellation: 16 }, scene);
+  dish.position.set(9.4, 4.55, 8.2); dish.rotation.x = -0.9; dish.material = antMat; dish.isPickable = false; reg(dish);
+
   // --- красные вертикальные лестницы (climb) на крыши ---
   vLadder(20.6, 13.4, 0, -1, 15.4); // на крышу здания c_bldg4 (уступ c_sidewlk1)
   vLadder(-21.1, 47.5, 1, 0, 11.3); // на верх коричневого ящика c3a1_crate (запад)
@@ -929,6 +969,17 @@ const mapDefs: { name: string; build: () => B.Vector3 | Promise<B.Vector3> }[] =
 let curMap = 0;
 let levelMeshes: B.AbstractMesh[] = [];
 let mapLoading = false;
+// камеры наблюдения (RenderTargetTexture) — не обычные меши, reg()/levelMeshes их не подхватывает,
+// поэтому чистим отдельно при смене карты (иначе на второй загрузке BSP-карты будут дублироваться).
+let cctvRigs: { cam: B.UniversalCamera; rtt: B.RenderTargetTexture }[] = [];
+function disposeCctv() {
+  for (const r of cctvRigs) {
+    scene.customRenderTargets.splice(scene.customRenderTargets.indexOf(r.rtt), 1);
+    r.rtt.dispose();
+    r.cam.dispose();
+  }
+  cctvRigs = [];
+}
 
 const mapToast = document.createElement('div');
 Object.assign(mapToast.style, { position: 'fixed', top: '46%', left: '50%', transform: 'translate(-50%,-50%)', font: '700 26px system-ui', color: '#fff', textShadow: '0 2px 6px #000', background: 'rgba(0,0,0,.45)', padding: '10px 22px', borderRadius: '10px', opacity: '0', transition: 'opacity .3s', pointerEvents: 'none', zIndex: '20' } as any);
@@ -949,6 +1000,7 @@ async function loadMap(i: number) {
   for (const d of doors) d.hinge.dispose(true);
   for (const t of targets) t.dispose();
   for (const p of pickups) p.dispose();
+  disposeCctv();
   levelMeshes = []; doors.length = 0; footprints.length = 0; targets.length = 0; pickups.length = 0;
   mapGen++; // отменяем отложенные респавны прошлой карты
   // сборка новой
