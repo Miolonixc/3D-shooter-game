@@ -857,14 +857,29 @@ async function buildBspMap(): Promise<B.Vector3> {
   const rimMat = mat('rim', '#9a9a9e', 0.3);
   function wheel(x: number, z: number) {
     const rad = 0.55;
+    // грузовик стоит вдоль X → ось колеса поперёк (вдоль Z): rotation.x (не .z — иначе колесо «лежит» боком)
     const tire = B.MeshBuilder.CreateCylinder('wheel', { diameter: rad * 2, height: 0.35 }, scene);
-    tire.rotation.z = Math.PI / 2; tire.position.set(x, rad, z); tire.material = wheelMat; tire.isPickable = false;
+    tire.rotation.x = Math.PI / 2; tire.position.set(x, rad, z); tire.material = wheelMat; tire.isPickable = false;
     reg(tire);
     const rim = B.MeshBuilder.CreateCylinder('rim', { diameter: rad * 1.1, height: 0.37 }, scene);
-    rim.rotation.z = Math.PI / 2; rim.position.set(x, rad, z); rim.material = rimMat; rim.isPickable = false;
+    rim.rotation.x = Math.PI / 2; rim.position.set(x, rad, z); rim.material = rimMat; rim.isPickable = false;
     reg(rim);
   }
   wheel(9.2, 8.3); wheel(9.2, 11.4); wheel(14.8, 8.3); wheel(14.8, 11.4);
+
+  // невидимые коллизии грузовика (сам он из декоративных trk_* граней без коллизии — в стыках
+  // застревал коллайдер). Простые выпуклые коробки: кабина целиком; у кузова стенки/перед/крыша,
+  // ЗАД ОТКРЫТ — в кузов можно зайти сзади (пол кузова y1.0 — ровно наш шаг), как в оригинале.
+  function solidBox(name: string, cx: number, cy: number, cz: number, w: number, h: number, d: number) {
+    const bx = B.MeshBuilder.CreateBox(name, { width: w, height: h, depth: d }, scene);
+    bx.position.set(cx, cy, cz); bx.isVisible = false; bx.checkCollisions = true;
+    reg(bx);
+  }
+  solidBox('trk_col_cab', 7.55, 0.95, 9.85, 1.9, 1.9, 4.3);   // кабина+капот
+  solidBox('trk_col_front', 8.55, 1.7, 9.85, 0.3, 3.4, 4.3);  // передняя стенка кузова
+  solidBox('trk_col_left', 11.95, 1.7, 7.85, 7.1, 3.4, 0.3);  // левый борт
+  solidBox('trk_col_right', 11.95, 1.7, 11.85, 7.1, 3.4, 0.3); // правый борт
+  solidBox('trk_col_roof', 11.95, 3.3, 9.85, 7.1, 0.2, 4.3);  // крыша (на ней можно стоять)
 
   // --- красные вертикальные лестницы (climb) на крыши ---
   vLadder(20.6, 13.4, 0, -1, 15.4); // на крышу здания c_bldg4 (уступ c_sidewlk1)
