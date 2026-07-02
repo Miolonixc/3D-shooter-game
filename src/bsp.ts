@@ -19,9 +19,10 @@ const DECOR_NONSOLID = /^trk_|sign_blarco|viewscreen|tankrear/i;
 const PROTECT_SOLID = /wall|w\d|crate|floor|flr|sidewlk|stone|rock|brck|brick|ccrete|concrete|tnnl|cement|c_bldg|bcontainer|silo|dsk|secdr|_dr\d|fifties_dr|babtech_dr|skkylite/i;
 // декоративные группы без защищённого имени и с маленьким габаритом (< 8 юнитов) — без коллизии
 const DECOR_MAX_EXTENT = 8;
-// невысокие бордюры/поребрики (ниже, чем наш шаг вверх ~1 юнит) — без коллизии Babylon,
-// перешагиваем через собственную вертикальную физику (см. LOW_KERB_HEIGHT ниже)
-const LOW_KERB_HEIGHT = 0.6;
+// невысокие бордюры/подступенки (ниже, чем наш шаг вверх ~1 юнит) — без коллизии Babylon,
+// перешагиваем через собственную вертикальную физику. 0.85: подступенки лестницы на мост
+// ~0.65–0.7 (при 0.6 они блокировали), а шаг физики 1.0 — с запасом.
+const LOW_KERB_HEIGHT = 0.85;
 
 type GroupKind = 'flat' | 'lowkerb' | 'wall';
 interface FaceGroup { name: string; positions: number[]; uvs: number[]; indices: number[]; texW: number; texH: number; minX: number; maxX: number; minY: number; maxY: number; minZ: number; maxZ: number; kind: GroupKind; }
@@ -99,10 +100,15 @@ function parse(buf: ArrayBuffer, scale: number): ParsedBsp {
       if (bx < minX) minX = bx; if (bx > maxX) maxX = bx;
       if (bz < minZ) minZ = bz; if (bz > maxZ) maxZ = bz;
     }
-    // нормаль грани — крест-произведение первых двух рёбер
-    const e1x = fx[1] - fx[0], e1y = fy[1] - fy[0], e1z = fz[1] - fz[0];
-    const e2x = fx[2] - fx[0], e2y = fy[2] - fy[0], e2z = fz[2] - fz[0];
-    let nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+    // нормаль грани — метод Ньюэлла по ВСЕМ рёбрам (крест первых двух рёбер ломается,
+    // если первые три вершины почти коллинеарны: пандус на мост уходил в «стены»)
+    let nx = 0, ny = 0, nz = 0;
+    for (let i = 0, n = fx.length; i < n; i++) {
+      const j = (i + 1) % n;
+      nx += (fy[i] - fy[j]) * (fz[i] + fz[j]);
+      ny += (fz[i] - fz[j]) * (fx[i] + fx[j]);
+      nz += (fx[i] - fx[j]) * (fy[i] + fy[j]);
+    }
     const nlen = Math.hypot(nx, ny, nz) || 1;
     ny /= nlen;
     const flat = Math.abs(ny) > 0.7; // почти горизонтальная грань (пол или потолок)
