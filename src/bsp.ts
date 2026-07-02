@@ -226,20 +226,35 @@ function tileTex(scene: B.Scene, name: string, base: string, grout: string) {
   return dt;
 }
 // деревянный ящик: горизонтальные доски + диагональные металлические рейки-крепления
-function crateTex(scene: B.Scene, name: string, base: string, dark: string) {
+// маленькая картонная коробка: крафт-цвет + крестовина упаковочной ленты + шов по краю
+function boxTex(scene: B.Scene, name: string, base: string, dark: string) {
   const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true);
   const ctx = dt.getContext() as any;
   ctx.fillStyle = base; ctx.fillRect(0, 0, 128, 128);
-  const plankH = 128 / 4;
-  for (let i = 0; i < 4; i++) {
-    ctx.fillStyle = shade(base, 0.85 + Math.random() * 0.3);
-    ctx.fillRect(0, i * plankH + 1, 128, plankH - 2);
+  const tape = shade(base, 1.25);                             // светлая глянцевая лента
+  ctx.fillStyle = tape;
+  ctx.fillRect(0, 54, 128, 20);                                // горизонтальная лента
+  ctx.fillRect(54, 0, 20, 128);                                // вертикальная лента
+  ctx.strokeStyle = shade(base, 0.6); ctx.lineWidth = 1;
+  ctx.strokeRect(0, 54, 128, 20); ctx.strokeRect(54, 0, 20, 128);
+  ctx.strokeStyle = dark; ctx.lineWidth = 3;                   // шов клапана по краю коробки
+  ctx.strokeRect(3, 3, 122, 122);
+  dt.update();
+  return dt;
+}
+// большой контейнер: гофрированный металл (горизонтальные рёбра) + круглая эмблема, как у синих
+function containerTex(scene: B.Scene, name: string, base: string, dark: string) {
+  const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true);
+  const ctx = dt.getContext() as any;
+  ctx.fillStyle = base; ctx.fillRect(0, 0, 128, 128);
+  for (let y = 0; y < 128; y += 12) {                           // гофры-рёбра
+    ctx.fillStyle = shade(base, 1.18); ctx.fillRect(0, y, 128, 4);
+    ctx.fillStyle = shade(base, 0.75); ctx.fillRect(0, y + 4, 128, 2);
   }
-  ctx.strokeStyle = dark; ctx.lineWidth = 2;
-  for (let i = 1; i < 4; i++) { ctx.beginPath(); ctx.moveTo(0, i * plankH); ctx.lineTo(128, i * plankH); ctx.stroke(); }
-  ctx.lineWidth = 7;
-  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(128, 128); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(128, 0); ctx.lineTo(0, 128); ctx.stroke();
+  ctx.strokeStyle = shade(base, 1.3); ctx.lineWidth = 4;        // круглая эмблема-логотип
+  ctx.beginPath(); ctx.arc(64, 64, 26, 0, 7); ctx.stroke();
+  ctx.beginPath(); ctx.arc(64, 64, 15, 0, 7); ctx.stroke();
+  ctx.strokeStyle = shade(base, 0.5); ctx.lineWidth = 5; ctx.strokeRect(2, 2, 124, 124); // рама
   dt.update();
   return dt;
 }
@@ -345,7 +360,7 @@ function canvasTex(scene: B.Scene, name: string, base: string, dark: string) {
   return dt;
 }
 
-type Category = 'concrete' | 'asphalt' | 'brick' | 'metal' | 'vent' | 'office' | 'wood' | 'crate' | 'floor' | 'glass' | 'light' | 'grass' | 'generic' | 'tire' | 'rim' | 'vehicle' | 'truckbed' | 'canvas' | 'dumpster' | 'fence' | 'gravel';
+type Category = 'concrete' | 'asphalt' | 'brick' | 'metal' | 'vent' | 'office' | 'wood' | 'crate' | 'container' | 'floor' | 'glass' | 'light' | 'grass' | 'generic' | 'tire' | 'rim' | 'vehicle' | 'truckbed' | 'canvas' | 'dumpster' | 'fence' | 'gravel';
 function categorize(name: string): Category {
   const n = name.toLowerCase().replace(/^[-+]\d*~?/, '');
   if (/glass|glu|window|wndow/.test(n)) return 'glass';
@@ -373,7 +388,7 @@ function categorize(name: string): Category {
   if (/ccrete|concrete|conc|tnnl|cement|wall|crete|comp|lab|c1a|c2a|c3a/.test(n)) return 'concrete';
   return 'generic';
 }
-const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' | 'crate' | 'vent' | 'office' | 'asphalt' | 'truckbed' | 'canvas' | 'dumpster' | 'fence']> = {
+const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' | 'crate' | 'container' | 'vent' | 'office' | 'asphalt' | 'truckbed' | 'canvas' | 'dumpster' | 'fence']> = {
   concrete: ['#9d968a', '#6d675b', 'speckle'], // тёпло-серый бетон (стены зданий/ангара, как в cs_assault)
   asphalt: ['#474a4e', '#30323a', 'asphalt'],   // асфальт: гладкий, без полос-штрихов под углом
   brick: ['#a3663f', '#3d2a20', 'brick'],
@@ -381,7 +396,8 @@ const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' |
   vent: ['#5c6068', '#33363c', 'vent'],          // вентиляция — жалюзи
   office: ['#6b6f77', '#22252b', 'office'],       // кабинет — консольные панели
   wood: ['#8a6541', '#4a3520', 'brick'],
-  crate: ['#9c703f', '#5a3d20', 'crate'],
+  crate: ['#c2a06a', '#8a6f45', 'crate'],        // маленькая коробка — крафт-картон
+  container: ['#7a4326', '#3d2313', 'container'], // большой ящик-контейнер — коричневый, как синие bcontainer
   floor: ['#8c8c86', '#4a4a44', 'tile'],
   glass: ['#7fa7c2', '#5c7f96', 'speckle'],
   light: ['#e8e2b8', '#c9c090', 'speckle'],
@@ -402,7 +418,8 @@ function procMaterial(scene: B.Scene, cat: Category): B.Material {
   if (m) return m;
   const [base, fleck, style] = catColor[cat];
   const mat = new B.StandardMaterial('proc_' + cat, scene);
-  const dt = style === 'crate' ? crateTex(scene, 'pt_' + cat, base, fleck)
+  const dt = style === 'crate' ? boxTex(scene, 'pt_' + cat, base, fleck)
+    : style === 'container' ? containerTex(scene, 'pt_' + cat, base, fleck)
     : style === 'asphalt' ? asphaltTex(scene, 'pt_' + cat, base, fleck)
     : style === 'truckbed' ? truckbedTex(scene, 'pt_' + cat, base, fleck)
     : style === 'canvas' ? canvasTex(scene, 'pt_' + cat, base, fleck)
@@ -473,9 +490,17 @@ export async function loadBsp(scene: B.Scene, bspUrl: string, wadUrl: string | n
     // светлые бетонные тротуары делаем асфальтом — чтобы двор был сплошь асфальтовый,
     // без светлых полос посреди дороги (перекрывает даже WAD-текстуру)
     const forceAsphalt = /sidewlk|sidewalk/.test(wadKey) && (g.kind === 'flat' || g.kind === 'lowkerb');
+    // один и тот же "crate"-текстурный набор переиспользован и на маленьких ящиках, и на
+    // огромных контейнерах размером с bcontainer — различаем их по габариту группы, а не
+    // по имени (имя "c1a1_crate2" встречается и у мелкой коробки, и у здоровенного короба).
+    let cat = categorize(g.name);
+    if (cat === 'crate') {
+      const maxExtent = Math.max(g.maxX - g.minX, g.maxY - g.minY, g.maxZ - g.minZ);
+      if (maxExtent >= 8) cat = 'container';
+    }
     mesh.material = forceAsphalt ? procMaterial(scene, 'asphalt')
       : wadTex ? wadTexToMaterial(scene, g.name, wadTex)
-      : procMaterial(scene, categorize(g.name));
+      : procMaterial(scene, cat);
     // коллизия решается ПО КАЖДОЙ ГРАНИ ещё при разборе (g.kind), а не по агрегату группы —
     // одна и та же текстура (напр. поребрик) может быть и низким бордюром, и высокой стеной
     // в разных местах карты, а агрегированный bbox группы это различие теряет.
