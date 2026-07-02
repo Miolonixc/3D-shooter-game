@@ -1063,6 +1063,35 @@ async function buildBspMap(): Promise<B.Vector3> {
   }
   buildPatroller(8, 56, 8, 80); // коридор у ворот (мост), x=8, z 56↔80 — прямо в кадре cctvGate
 
+  // --- большие гаражные ворота на въезде с моста (в BSP это просто открытый проём без
+  // отдельного объекта-двери — обрамляем его рамой с гофрированной текстурой роллет-ворот) ---
+  const gateDt = new B.DynamicTexture('gateTex', { width: 128, height: 256 }, scene, true);
+  { const ctx = gateDt.getContext() as any;
+    ctx.fillStyle = '#5a6068'; ctx.fillRect(0, 0, 128, 256);           // серо-голубой металл
+    for (let y = 0; y < 256; y += 18) {                                // горизонтальные ламели рольставни
+      ctx.fillStyle = '#454b52'; ctx.fillRect(0, y, 128, 3);
+      ctx.fillStyle = '#7a828c'; ctx.fillRect(0, y + 3, 128, 2);
+    }
+    ctx.fillStyle = '#e8b93c'; ctx.fillRect(0, 226, 128, 10);           // предупреждающая полоса снизу
+    ctx.fillStyle = '#1a1a1a';
+    for (let x = 0; x < 128; x += 20) { ctx.save(); ctx.translate(x, 226); ctx.rotate(Math.PI / 4); ctx.fillRect(-6, -6, 8, 22); ctx.restore(); }
+    ctx.strokeStyle = '#2c3036'; ctx.lineWidth = 6; ctx.strokeRect(3, 3, 122, 250); // рама
+    gateDt.update(); }
+  const gateMat = new B.StandardMaterial('gateMat', scene);
+  gateMat.diffuseTexture = gateDt; gateMat.specularColor = new B.Color3(0.08, 0.08, 0.08);
+  const gatePillarMat = mat('gatePillar', '#3a3e44', 0.1);
+  box('gate_header', 8, 8.9, 50, 17, 0.9, 0.5, gatePillarMat);          // верхняя балка проёма
+  box('gate_pillarL', 0.2, 4.25, 50, 0.6, 8.5, 0.6, gatePillarMat);     // левый столб
+  box('gate_pillarR', 15.8, 4.25, 50, 0.6, 8.5, 0.6, gatePillarMat);    // правый столб
+  // сами роллет-ворота подняты (открыты) — скрученным рулоном под балкой, проезд свободен;
+  // гофра/полоса видны на самой ткани рулона и на коротких боковых направляющих у столбов
+  const gateRoll = B.MeshBuilder.CreateCylinder('gate_roll', { diameter: 0.9, height: 15.6, tessellation: 12 }, scene);
+  gateRoll.rotation.z = Math.PI / 2; gateRoll.position.set(8, 8.3, 50.15);
+  gateRoll.material = gateMat; gateRoll.checkCollisions = false; gateRoll.isPickable = false;
+  reg(gateRoll);
+  const railL = box('gate_railL', 1.0, 4.4, 50.3, 0.35, 8.2, 0.1, gateMat); railL.checkCollisions = false; railL.isPickable = false;
+  const railR = box('gate_railR', 15.0, 4.4, 50.3, 0.35, 8.2, 0.1, gateMat); railR.checkCollisions = false; railR.isPickable = false;
+
   return new B.Vector3(r.spawn.x, r.spawn.y + EYE, r.spawn.z); // камера = точка спавна + рост глаз
 }
 
