@@ -44,6 +44,8 @@ camera.inputs.removeByType('FreeCameraKeyboardMoveInput');
 let monitorTriggerPos: B.Vector3 | null = null; // задаётся картой (buildBspMap), null на других картах
 let monitorActive = false;
 let monitorIdx = 0;
+let monitorScreenMat: B.StandardMaterial | null = null; // физический экран в кузове — текущая камера как превью
+function syncMonitorScreen() { if (monitorScreenMat && cctvRigs.length) monitorScreenMat.emissiveTexture = cctvRigs[monitorIdx].rtt; }
 function exitMonitor() {
   if (!monitorActive) return;
   monitorActive = false;
@@ -681,10 +683,10 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyE') {
     if (monitorActive) {
       // в мониторе E листает камеры по кругу
-      if (cctvRigs.length) { monitorIdx = (monitorIdx + 1) % cctvRigs.length; scene.activeCamera = cctvRigs[monitorIdx].cam; showMonitorHud(); }
+      if (cctvRigs.length) { monitorIdx = (monitorIdx + 1) % cctvRigs.length; scene.activeCamera = cctvRigs[monitorIdx].cam; showMonitorHud(); syncMonitorScreen(); }
     } else if (monitorTriggerPos && cctvRigs.length && B.Vector3.Distance(camera.position, monitorTriggerPos) < 3.2) {
       monitorActive = true; monitorIdx = 0; scene.activeCamera = cctvRigs[0].cam;
-      showMonitorPrompt(false); showMonitorHud();
+      showMonitorPrompt(false); showMonitorHud(); syncMonitorScreen();
     }
   }
   if (e.code === 'Escape') exitMonitor(); // Esc и так снимает pointer lock — логично им же выйти из монитора
@@ -969,22 +971,21 @@ async function buildBspMap(): Promise<B.Vector3> {
   const rttUpper = cctvCamera('cctvUpper', 28, 17.6, 20, 18, 15.8, 10); // крыша здания (верхний уровень)
   const rttExit = cctvCamera('cctvExit', 5, 10, 78, 11.5, 10.1, 86.6); // выход из ангара (дверь+лестница)
 
-  // Экраны на крыше кузова, рядом с антенной. Внутри кузова (под тентом) не вышло: тент —
-  // это скатная крыша-домиком, а не сплошные борта (по бокам открыто наружу), а нижняя часть
-  // кузова забита декоративным реквизитом соседней лаборатории (recharged/lab1_comp*) — надёжного
-  // непересекающегося места под 3 монитора там нет. Крыша — проверенно чистая (стоять уже можно).
-  function cctvScreen(x: number, y: number, z: number, rtt: B.RenderTargetTexture) {
-    const p = B.MeshBuilder.CreatePlane('cctvScreen', { width: 1.1, height: 0.85 }, scene);
-    p.position.set(x, y, z); // нормаль +Z по умолчанию — на открытую сторону крыши (там же антенна)
-    const m = new B.StandardMaterial('cctvScreenMat', scene);
-    m.emissiveTexture = rtt; m.diffuseColor = new B.Color3(0, 0, 0); m.specularColor = new B.Color3(0, 0, 0);
-    m.backFaceCulling = false;
-    p.material = m; p.checkCollisions = false; p.isPickable = false;
-    reg(p);
-  }
-  cctvScreen(11, 3.85, 8.6, rttGate);
-  cctvScreen(12.6, 3.85, 8.6, rttUpper);
-  cctvScreen(14.2, 3.85, 8.6, rttExit);
+  // Один монитор внутри кузова (в фургоне), на левом борту — единственное найденное место
+  // с чистой линией обзора: передняя стенка изнутри заставлена декоративным реквизитом
+  // соседней лаборатории (lab1_comp*/recharged), который перекрывает вид с любой высоты и
+  // почти любой позиции в кузове, а сам тент подходит вплотную к полу у стенки. Борт свободнее.
+  // Показывает ТЕКУЩУЮ выбранную камеру (monitorIdx) — переключение и полноэкранный режим по
+  // E делает уже существующий монитор-режим (см. keydown/exitMonitor).
+  box('monitorStand', 11, 1.15, 8.05, 0.5, 0.7, 0.15, mat('monitorStandMat', '#33352f', 0.08)).checkCollisions = false;
+  const monitorScreen = B.MeshBuilder.CreatePlane('cctvScreen', { width: 0.7, height: 0.5 }, scene);
+  monitorScreen.position.set(11, 1.5, 8.02); // нормаль +Z по умолчанию — вглубь кузова, к левому борту
+  monitorScreenMat = new B.StandardMaterial('cctvScreenMat', scene);
+  monitorScreenMat.diffuseColor = new B.Color3(0, 0, 0); monitorScreenMat.specularColor = new B.Color3(0, 0, 0);
+  monitorScreenMat.backFaceCulling = false;
+  monitorScreen.material = monitorScreenMat; monitorScreen.checkCollisions = false; monitorScreen.isPickable = false;
+  reg(monitorScreen);
+  syncMonitorScreen(); // сразу показать камеру 1/3, не дожидаясь первого переключения
 
   // спутниковая антенна на крыше кузова (декоративная — обоснование для камер)
   const antMat = mat('antenna', '#c9cbce', 0.3);
@@ -1024,8 +1025,9 @@ async function buildBspMap(): Promise<B.Vector3> {
   deadEndMark(0.12, 1.9, -5.76, 0, 1);    // тупик у офисной стены
   deadEndMark(24.96, 1.9, 7.03, -1, 0);   // тупик у спавна/грузовика
 
-  // точка входа в монитор видеонаблюдения — у кабины грузовика, на земле (без залезания на крышу)
-  monitorTriggerPos = new B.Vector3(7.6, 1.5, 9.85);
+  // точка входа в монитор видеонаблюдения — внутри кузова, у экрана на левом борту
+  // (заходить через открытый зад кузова, х>15.5, коллизии там нет — см. trk_col_* выше)
+  monitorTriggerPos = new B.Vector3(12, 1.5, 9);
 
   // --- патрульный «террорист»: низкополигональная фигура, ходит туда-сюда в коридоре у
   // ворот со стороны моста — попадает в кадр камеры cctvGate ---
@@ -1137,7 +1139,7 @@ async function loadMap(i: number) {
   for (const p of pickups) p.dispose();
   exitMonitor(); // на случай смены карты прямо во время просмотра камер — не оставлять activeCamera на удаляемой cctv-камере
   disposeCctv();
-  monitorTriggerPos = null; showMonitorPrompt(false);
+  monitorTriggerPos = null; showMonitorPrompt(false); monitorScreenMat = null;
   patroller?.root.dispose(); patroller = null;
   levelMeshes = []; doors.length = 0; footprints.length = 0; targets.length = 0; pickups.length = 0;
   mapGen++; // отменяем отложенные респавны прошлой карты
