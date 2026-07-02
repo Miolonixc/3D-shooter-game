@@ -181,10 +181,17 @@ function asphaltTex(scene: B.Scene, name: string, base: string, _dark: string) {
   return dt;
 }
 function speckleTex(scene: B.Scene, name: string, base: string, fleck: string) {
-  const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true); // мипмапы — без них тайлинг на полу даёт муар/полосы
+  // как asphaltTex: крупные мягкие пятна вместо мелкого зерна — 2px-точки на больших
+  // поверхностях под скользящим углом дают длинные тёмные линии-штрихи (анизотропия)
+  const dt = new B.DynamicTexture(name, { width: 256, height: 256 }, scene, true);
   const ctx = dt.getContext() as any;
-  ctx.fillStyle = base; ctx.fillRect(0, 0, 128, 128);
-  for (let i = 0; i < 700; i++) { ctx.fillStyle = Math.random() < 0.5 ? fleck : base; ctx.fillRect(Math.random() * 128, Math.random() * 128, 2, 2); }
+  ctx.fillStyle = base; ctx.fillRect(0, 0, 256, 256);
+  ctx.globalAlpha = 0.22;
+  for (let i = 0; i < 70; i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? fleck : shade(base, 1.07);
+    ctx.beginPath(); ctx.arc(Math.random() * 256, Math.random() * 256, 7 + Math.random() * 16, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
   dt.update();
   return dt;
 }
@@ -271,7 +278,7 @@ function categorize(name: string): Category {
   if (/glass|glu|window|wndow/.test(n)) return 'glass';
   if (/light|neon|lgt|pow\b/.test(n)) return 'light';
   if (/grss|grass/.test(n)) return 'grass';
-  if (/duct|vnt|vent|pfab|galv|grille/.test(n)) return 'vent';        // система вентиляции
+  if (/duct|vnt|vent|pfab|grille/.test(n)) return 'vent';             // система вентиляции (воздуховоды/решётки)
   if (/comp\d|generic\d|recharged|viewscreen|dsk|desk|babtech|fifties|introdr|secdr|tankrear|silo/.test(n)) return 'office'; // кабинет/консоли/шкафы
   if (/crate|xcrate/.test(n)) return 'crate';
   if (/^trk_(tire|tread)/.test(n)) return 'tire';
@@ -281,7 +288,7 @@ function categorize(name: string): Category {
   if (/flr|floor/.test(n)) return 'floor';
   if (/brck|brick|stone|rockwall/.test(n)) return 'brick';
   if (/wood|wd\b/.test(n)) return 'wood';
-  if (/metal|mtl|drkmtl|door|dr\d|trim/.test(n)) return 'metal';
+  if (/metal|mtl|drkmtl|door|dr\d|trim|galv/.test(n)) return 'metal'; // galv — оцинкованная крыша ангара (гладкая, без жалюзи)
   if (/ccrete|concrete|conc|tnnl|cement|wall|crete|comp|lab|c1a|c2a|c3a/.test(n)) return 'concrete';
   return 'generic';
 }
