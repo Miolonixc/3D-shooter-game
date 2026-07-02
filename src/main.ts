@@ -40,6 +40,17 @@ camera.ellipsoidOffset = new B.Vector3(0, -0.8, 0);
 camera.inputs.removeByType('FreeCameraMouseInput');
 camera.inputs.removeByType('FreeCameraKeyboardMoveInput');
 
+// --- монитор видеонаблюдения (грузовик, карта BSP) ---
+let monitorTriggerPos: B.Vector3 | null = null; // задаётся картой (buildBspMap), null на других картах
+let monitorActive = false;
+let monitorIdx = 0;
+function exitMonitor() {
+  if (!monitorActive) return;
+  monitorActive = false;
+  scene.activeCamera = camera;
+  hideMonitorHud();
+}
+
 // --- материалы ---
 const mat = (name: string, hex: string, spec = 0.04) => {
   const m = new B.StandardMaterial(name, scene);
@@ -630,7 +641,7 @@ document.addEventListener('mousemove', (e) => {
   camera.rotation.x = Math.max(-1.45, Math.min(1.45, camera.rotation.x + e.movementY * 0.0022));
 });
 let mouseDown = false;
-document.addEventListener('mousedown', (e) => { if (locked() && e.button === 0) { mouseDown = true; fire(); } });
+document.addEventListener('mousedown', (e) => { if (locked() && e.button === 0 && !monitorActive) { mouseDown = true; fire(); } });
 document.addEventListener('mouseup', () => { mouseDown = false; });
 
 // движение по физическим кодам клавиш (event.code) — любая раскладка (WASD == ЦФЫВ).
@@ -647,7 +658,37 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyR') reload();
   if (e.code === 'KeyM') loadMap(curMap + 1);
   if (e.code === 'KeyP') showPos();   // отладка: показать координаты на экране
+  if (e.code === 'KeyE') {
+    if (monitorActive) {
+      // в мониторе E листает камеры по кругу
+      if (cctvRigs.length) { monitorIdx = (monitorIdx + 1) % cctvRigs.length; scene.activeCamera = cctvRigs[monitorIdx].cam; showMonitorHud(); }
+    } else if (monitorTriggerPos && cctvRigs.length && B.Vector3.Distance(camera.position, monitorTriggerPos) < 3.2) {
+      monitorActive = true; monitorIdx = 0; scene.activeCamera = cctvRigs[0].cam;
+      showMonitorPrompt(false); showMonitorHud();
+    }
+  }
+  if (e.code === 'Escape') exitMonitor(); // Esc и так снимает pointer lock — логично им же выйти из монитора
 });
+
+// --- HUD монитора видеонаблюдения ---
+const monitorPrompt = document.createElement('div');
+monitorPrompt.textContent = 'E — монитор видеонаблюдения';
+monitorPrompt.style.cssText = 'position:fixed;left:50%;bottom:22%;transform:translateX(-50%);z-index:15;'
+  + 'background:rgba(0,0,0,.55);color:#fff;font:600 18px system-ui;padding:8px 16px;border-radius:8px;'
+  + 'pointer-events:none;white-space:nowrap;opacity:0;transition:opacity .15s;';
+document.body.appendChild(monitorPrompt);
+function showMonitorPrompt(show: boolean) { monitorPrompt.style.opacity = show ? '1' : '0'; }
+
+const monitorHud = document.createElement('div');
+monitorHud.style.cssText = 'position:fixed;left:50%;bottom:6%;transform:translateX(-50%);z-index:15;'
+  + 'background:rgba(0,0,0,.6);color:#7fd4ff;font:700 16px system-ui;padding:8px 18px;border-radius:8px;'
+  + 'pointer-events:none;white-space:nowrap;display:none;';
+document.body.appendChild(monitorHud);
+function showMonitorHud() {
+  monitorHud.textContent = `📹 Камера ${monitorIdx + 1}/${cctvRigs.length}   ·   E — след. камера   ·   Esc — выход`;
+  monitorHud.style.display = 'block';
+}
+function hideMonitorHud() { monitorHud.style.display = 'none'; }
 
 // отладочный вывод позиции: тост на экране + копирование в буфер (для расстановки лестниц и т.п.)
 function showPos() {
@@ -734,6 +775,11 @@ const GRAV = -0.013, JUMP = 0.23, EYE = 1.7, MOVE = 0.06; // MOVE — ускор
 const spawnPoint = new B.Vector3(0, EYE, -26);             // точка спавна текущей карты
 let bobPhase = 0, gunDip = 0, lastX = camera.position.x, lastZ = camera.position.z;
 scene.onBeforeRenderObservable.add(() => {
+  // монитор видеонаблюдения: показать подсказку рядом с грузовиком; пока смотрим камеры —
+  // вся остальная игровая логика (физика/стрельба/движение) на паузе
+  if (monitorTriggerPos) showMonitorPrompt(!monitorActive && B.Vector3.Distance(camera.position, monitorTriggerPos) < 3.2);
+  if (monitorActive) return;
+
   const crouching = held.has('ControlLeft') || held.has('ControlRight');
   const eyeNow = crouching ? 1.05 : EYE; // присед опускает камеру
   const downRay = new B.Ray(camera.position, new B.Vector3(0, -1, 0), 60);
@@ -957,6 +1003,9 @@ async function buildBspMap(): Promise<B.Vector3> {
   deadEndMark(0.12, 1.9, -5.76, 0, 1);    // тупик у офисной стены
   deadEndMark(24.96, 1.9, 7.03, -1, 0);   // тупик у спавна/грузовика
 
+  // точка входа в монитор видеонаблюдения — у кабины грузовика, на земле (без залезания на крышу)
+  monitorTriggerPos = new B.Vector3(7.6, 1.5, 9.85);
+
   return new B.Vector3(r.spawn.x, r.spawn.y + EYE, r.spawn.z); // камера = точка спавна + рост глаз
 }
 
@@ -1000,7 +1049,9 @@ async function loadMap(i: number) {
   for (const d of doors) d.hinge.dispose(true);
   for (const t of targets) t.dispose();
   for (const p of pickups) p.dispose();
+  exitMonitor(); // на случай смены карты прямо во время просмотра камер — не оставлять activeCamera на удаляемой cctv-камере
   disposeCctv();
+  monitorTriggerPos = null; showMonitorPrompt(false);
   levelMeshes = []; doors.length = 0; footprints.length = 0; targets.length = 0; pickups.length = 0;
   mapGen++; // отменяем отложенные респавны прошлой карты
   // сборка новой
