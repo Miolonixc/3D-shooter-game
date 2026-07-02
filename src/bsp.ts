@@ -279,7 +279,8 @@ function categorize(name: string): Category {
   if (/light|neon|lgt|pow\b/.test(n)) return 'light';
   if (/grss|grass/.test(n)) return 'grass';
   if (/duct|vnt|vent|pfab|grille/.test(n)) return 'vent';             // система вентиляции (воздуховоды/решётки)
-  if (/comp\d|generic\d|recharged|viewscreen|dsk|desk|babtech|fifties|introdr|secdr|tankrear|silo/.test(n)) return 'office'; // кабинет/консоли/шкафы
+  if (/comp\d|generic\d|recharged|viewscreen|dsk|desk|babtech|fifties|introdr|secdr|tankrear/.test(n)) return 'office'; // кабинет/консоли/шкафы
+  if (/silo/.test(n)) return 'metal'; // стена-силос — гладкий металл (сетка officeTex на ней давала линии)
   if (/crate|xcrate/.test(n)) return 'crate';
   if (/^trk_(tire|tread)/.test(n)) return 'tire';
   if (/^trk_rim/.test(n)) return 'rim';
