@@ -274,7 +274,45 @@ function officeTex(scene: B.Scene, name: string, base: string, dark: string) {
   return dt;
 }
 
-type Category = 'concrete' | 'asphalt' | 'brick' | 'metal' | 'vent' | 'office' | 'wood' | 'crate' | 'floor' | 'glass' | 'light' | 'grass' | 'generic' | 'tire' | 'rim' | 'vehicle';
+// рифлёный металлический пол кузова (diamond plate): сетка ромбов-выступов
+function truckbedTex(scene: B.Scene, name: string, base: string, dark: string) {
+  const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true);
+  const ctx = dt.getContext() as any;
+  ctx.fillStyle = base; ctx.fillRect(0, 0, 128, 128);
+  const step = 16;
+  for (let y = 0; y < 128; y += step) {
+    for (let x = 0; x < 128; x += step) {
+      const ox = (Math.floor(y / step) % 2) * (step / 2);
+      const cx = x + ox, cy = y + step / 2;
+      ctx.fillStyle = shade(base, 1.25);
+      ctx.beginPath(); ctx.moveTo(cx, cy - 4); ctx.lineTo(cx + 4, cy); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 4, cy); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = dark;
+      ctx.beginPath(); ctx.moveTo(cx, cy - 2); ctx.lineTo(cx + 2, cy); ctx.lineTo(cx, cy + 2); ctx.lineTo(cx - 2, cy); ctx.closePath(); ctx.fill();
+    }
+  }
+  dt.update();
+  return dt;
+}
+// брезентовый тент: диагональное плетение ткани, приглушённый хаки
+function canvasTex(scene: B.Scene, name: string, base: string, dark: string) {
+  const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true);
+  const ctx = dt.getContext() as any;
+  ctx.fillStyle = base; ctx.fillRect(0, 0, 128, 128);
+  ctx.strokeStyle = dark; ctx.globalAlpha = 0.35; ctx.lineWidth = 1;
+  for (let i = -128; i < 256; i += 6) {
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + 128, 128); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(i, 128); ctx.lineTo(i + 128, 0); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  // редкие тёмные пятна/потёртости
+  ctx.fillStyle = dark; ctx.globalAlpha = 0.15;
+  for (let i = 0; i < 12; i++) { ctx.beginPath(); ctx.arc(Math.random() * 128, Math.random() * 128, 6 + Math.random() * 10, 0, 7); ctx.fill(); }
+  ctx.globalAlpha = 1;
+  dt.update();
+  return dt;
+}
+
+type Category = 'concrete' | 'asphalt' | 'brick' | 'metal' | 'vent' | 'office' | 'wood' | 'crate' | 'floor' | 'glass' | 'light' | 'grass' | 'generic' | 'tire' | 'rim' | 'vehicle' | 'truckbed' | 'canvas';
 function categorize(name: string): Category {
   const n = name.toLowerCase().replace(/^[-+]\d*~?/, '');
   if (/glass|glu|window|wndow/.test(n)) return 'glass';
@@ -286,6 +324,8 @@ function categorize(name: string): Category {
   if (/crate|xcrate/.test(n)) return 'crate';
   if (/^trk_(tire|tread)/.test(n)) return 'tire';
   if (/^trk_rim/.test(n)) return 'rim';
+  if (/^trk_bed/.test(n)) return 'truckbed';   // рифлёный металлический пол кузова
+  if (/^trk_canvas/.test(n)) return 'canvas';  // брезентовый тент
   if (/^trk_/.test(n)) return 'vehicle';
   if (/tnnl_flr|labflr|duct_flr|crete4_flr|_flr\d|out_pave/.test(n)) return 'asphalt'; // асфальт: двор-дорога снаружи + вход/туннель внутри
   if (/flr|floor/.test(n)) return 'floor';
@@ -295,7 +335,7 @@ function categorize(name: string): Category {
   if (/ccrete|concrete|conc|tnnl|cement|wall|crete|comp|lab|c1a|c2a|c3a/.test(n)) return 'concrete';
   return 'generic';
 }
-const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' | 'crate' | 'vent' | 'office' | 'asphalt']> = {
+const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' | 'crate' | 'vent' | 'office' | 'asphalt' | 'truckbed' | 'canvas']> = {
   concrete: ['#9d968a', '#6d675b', 'speckle'], // тёпло-серый бетон (стены зданий/ангара, как в cs_assault)
   asphalt: ['#474a4e', '#30323a', 'asphalt'],   // асфальт: гладкий, без полос-штрихов под углом
   brick: ['#a3663f', '#3d2a20', 'brick'],
@@ -312,6 +352,8 @@ const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' |
   tire: ['#232323', '#141414', 'speckle'],
   rim: ['#9a9a9e', '#6a6a6e', 'speckle'],
   vehicle: ['#6e6a52', '#4a4738', 'speckle'],
+  truckbed: ['#4f524f', '#2b2d2b', 'truckbed'], // рифлёный металлический пол кузова
+  canvas: ['#8a835f', '#5c5640', 'canvas'],      // брезентовый тент кузова
 };
 const procMatCache = new Map<Category, B.Material>();
 function procMaterial(scene: B.Scene, cat: Category): B.Material {
@@ -321,6 +363,8 @@ function procMaterial(scene: B.Scene, cat: Category): B.Material {
   const mat = new B.StandardMaterial('proc_' + cat, scene);
   const dt = style === 'crate' ? crateTex(scene, 'pt_' + cat, base, fleck)
     : style === 'asphalt' ? asphaltTex(scene, 'pt_' + cat, base, fleck)
+    : style === 'truckbed' ? truckbedTex(scene, 'pt_' + cat, base, fleck)
+    : style === 'canvas' ? canvasTex(scene, 'pt_' + cat, base, fleck)
     : style === 'vent' ? ventTex(scene, 'pt_' + cat, base, fleck)
     : style === 'office' ? officeTex(scene, 'pt_' + cat, base, fleck)
     : style === 'brick' ? brickTex(scene, 'pt_' + cat, base, fleck)
