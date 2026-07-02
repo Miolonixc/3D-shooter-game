@@ -16,7 +16,7 @@ const DECOR_NONSOLID = /^trk_|sign_blarco|viewscreen|tankrear/i;
 // капитальные категории — коллизия ВСЕГДА включена, независимо от габаритов группы
 // (важно: некоторые настоящие стены/двери имеют небольшой суммарный bbox, если текстура
 // использована лишь в одном месте карты — по имени их не спутать с декором)
-const PROTECT_SOLID = /wall|w\d|crate|floor|flr|sidewlk|stone|rock|brck|brick|ccrete|concrete|tnnl|cement|c_bldg|bcontainer|silo|dsk|secdr|_dr\d|fifties_dr|babtech_dr|skkylite/i;
+const PROTECT_SOLID = /wall|w\d|crate|floor|flr|sidewlk|stone|rock|brck|brick|ccrete|concrete|tnnl|cement|c_bldg|bcontainer|silo|dsk|secdr|_dr\d|fifties_dr|babtech_dr|skkylite|dmp/i;
 // декоративные группы без защищённого имени и с маленьким габаритом (< 8 юнитов) — без коллизии
 const DECOR_MAX_EXTENT = 8;
 // невысокие бордюры/подступенки (ниже, чем наш шаг вверх ~1 юнит) — без коллизии Babylon,
@@ -274,6 +274,23 @@ function officeTex(scene: B.Scene, name: string, base: string, dark: string) {
   return dt;
 }
 
+// мусорный контейнер: ржавый гофрированный металл (вертикальные рёбра) + потёки/пятна
+function dumpsterTex(scene: B.Scene, name: string, base: string, dark: string) {
+  const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true);
+  const ctx = dt.getContext() as any;
+  ctx.fillStyle = base; ctx.fillRect(0, 0, 128, 128);
+  for (let x = 0; x < 128; x += 10) {                        // вертикальные гофры
+    ctx.fillStyle = shade(base, 1.12); ctx.fillRect(x, 0, 4, 128);
+    ctx.fillStyle = shade(base, 0.8); ctx.fillRect(x + 4, 0, 2, 128);
+  }
+  ctx.fillStyle = dark; ctx.globalAlpha = 0.4;               // потёки ржавчины сверху вниз
+  for (let i = 0; i < 10; i++) { const x = Math.random() * 128, w = 3 + Math.random() * 6;
+    ctx.fillRect(x, 0, w, 40 + Math.random() * 80); }
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = shade(base, 0.5); ctx.lineWidth = 4; ctx.strokeRect(2, 2, 124, 124); // рама
+  dt.update();
+  return dt;
+}
 // рифлёный металлический пол кузова (diamond plate): сетка ромбов-выступов
 function truckbedTex(scene: B.Scene, name: string, base: string, dark: string) {
   const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true);
@@ -312,7 +329,7 @@ function canvasTex(scene: B.Scene, name: string, base: string, dark: string) {
   return dt;
 }
 
-type Category = 'concrete' | 'asphalt' | 'brick' | 'metal' | 'vent' | 'office' | 'wood' | 'crate' | 'floor' | 'glass' | 'light' | 'grass' | 'generic' | 'tire' | 'rim' | 'vehicle' | 'truckbed' | 'canvas';
+type Category = 'concrete' | 'asphalt' | 'brick' | 'metal' | 'vent' | 'office' | 'wood' | 'crate' | 'floor' | 'glass' | 'light' | 'grass' | 'generic' | 'tire' | 'rim' | 'vehicle' | 'truckbed' | 'canvas' | 'dumpster';
 function categorize(name: string): Category {
   const n = name.toLowerCase().replace(/^[-+]\d*~?/, '');
   if (/glass|glu|window|wndow/.test(n)) return 'glass';
@@ -321,6 +338,7 @@ function categorize(name: string): Category {
   if (/duct|vnt|vent|pfab|grille/.test(n)) return 'vent';             // система вентиляции (воздуховоды/решётки)
   if (/comp\d|generic\d|recharged|viewscreen|dsk|desk|babtech|fifties|introdr|secdr|tankrear/.test(n)) return 'office'; // кабинет/консоли/шкафы
   if (/silo/.test(n)) return 'metal'; // стена-силос — гладкий металл (сетка officeTex на ней давала линии)
+  if (/dmp/.test(n)) return 'dumpster'; // мусорный контейнер
   if (/crate|xcrate/.test(n)) return 'crate';
   if (/^trk_(tire|tread)/.test(n)) return 'tire';
   if (/^trk_rim/.test(n)) return 'rim';
@@ -335,7 +353,7 @@ function categorize(name: string): Category {
   if (/ccrete|concrete|conc|tnnl|cement|wall|crete|comp|lab|c1a|c2a|c3a/.test(n)) return 'concrete';
   return 'generic';
 }
-const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' | 'crate' | 'vent' | 'office' | 'asphalt' | 'truckbed' | 'canvas']> = {
+const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' | 'crate' | 'vent' | 'office' | 'asphalt' | 'truckbed' | 'canvas' | 'dumpster']> = {
   concrete: ['#9d968a', '#6d675b', 'speckle'], // тёпло-серый бетон (стены зданий/ангара, как в cs_assault)
   asphalt: ['#474a4e', '#30323a', 'asphalt'],   // асфальт: гладкий, без полос-штрихов под углом
   brick: ['#a3663f', '#3d2a20', 'brick'],
@@ -354,6 +372,7 @@ const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' |
   vehicle: ['#6e6a52', '#4a4738', 'speckle'],
   truckbed: ['#4f524f', '#2b2d2b', 'truckbed'], // рифлёный металлический пол кузова
   canvas: ['#8a835f', '#5c5640', 'canvas'],      // брезентовый тент кузова
+  dumpster: ['#3c5943', '#1c2620', 'dumpster'],  // мусорный контейнер — тёмно-зелёный ржавый металл
 };
 const procMatCache = new Map<Category, B.Material>();
 function procMaterial(scene: B.Scene, cat: Category): B.Material {
@@ -365,6 +384,7 @@ function procMaterial(scene: B.Scene, cat: Category): B.Material {
     : style === 'asphalt' ? asphaltTex(scene, 'pt_' + cat, base, fleck)
     : style === 'truckbed' ? truckbedTex(scene, 'pt_' + cat, base, fleck)
     : style === 'canvas' ? canvasTex(scene, 'pt_' + cat, base, fleck)
+    : style === 'dumpster' ? dumpsterTex(scene, 'pt_' + cat, base, fleck)
     : style === 'vent' ? ventTex(scene, 'pt_' + cat, base, fleck)
     : style === 'office' ? officeTex(scene, 'pt_' + cat, base, fleck)
     : style === 'brick' ? brickTex(scene, 'pt_' + cat, base, fleck)
