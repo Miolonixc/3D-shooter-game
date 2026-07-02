@@ -159,6 +159,21 @@ function shade(hex: string, f: number) {
   const b = Math.min(255, (n & 255) * f) | 0;
   return 'rgb(' + r + ',' + g + ',' + b + ')';
 }
+// гладкий асфальт: крупные мягкие пятна очень низкого контраста, БЕЗ мелкого зерна —
+// иначе на огромном полу под углом анизотропная фильтрация «зерна» даёт тёмные полосы-штрихи.
+function asphaltTex(scene: B.Scene, name: string, base: string, _dark: string) {
+  const dt = new B.DynamicTexture(name, { width: 256, height: 256 }, scene, true);
+  const ctx = dt.getContext() as any;
+  ctx.fillStyle = base; ctx.fillRect(0, 0, 256, 256);
+  ctx.globalAlpha = 0.45;
+  for (let i = 0; i < 60; i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? shade(base, 1.05) : shade(base, 0.95);
+    ctx.beginPath(); ctx.arc(Math.random() * 256, Math.random() * 256, 8 + Math.random() * 18, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  dt.update();
+  return dt;
+}
 function speckleTex(scene: B.Scene, name: string, base: string, fleck: string) {
   const dt = new B.DynamicTexture(name, { width: 128, height: 128 }, scene, true); // мипмапы — без них тайлинг на полу даёт муар/полосы
   const ctx = dt.getContext() as any;
@@ -264,9 +279,9 @@ function categorize(name: string): Category {
   if (/ccrete|concrete|conc|tnnl|cement|wall|crete|comp|lab|c1a|c2a|c3a/.test(n)) return 'concrete';
   return 'generic';
 }
-const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' | 'crate' | 'vent' | 'office']> = {
+const catColor: Record<Category, [string, string, 'speckle' | 'brick' | 'tile' | 'crate' | 'vent' | 'office' | 'asphalt']> = {
   concrete: ['#9d968a', '#6d675b', 'speckle'], // тёпло-серый бетон (стены зданий/ангара, как в cs_assault)
-  asphalt: ['#474a4e', '#30323a', 'speckle'],   // асфальт: двор-дорога снаружи + вход/туннель
+  asphalt: ['#474a4e', '#30323a', 'asphalt'],   // асфальт: гладкий, без полос-штрихов под углом
   brick: ['#a3663f', '#3d2a20', 'brick'],
   metal: ['#4d5158', '#2a2d32', 'speckle'],
   vent: ['#5c6068', '#33363c', 'vent'],          // вентиляция — жалюзи
@@ -289,6 +304,7 @@ function procMaterial(scene: B.Scene, cat: Category): B.Material {
   const [base, fleck, style] = catColor[cat];
   const mat = new B.StandardMaterial('proc_' + cat, scene);
   const dt = style === 'crate' ? crateTex(scene, 'pt_' + cat, base, fleck)
+    : style === 'asphalt' ? asphaltTex(scene, 'pt_' + cat, base, fleck)
     : style === 'vent' ? ventTex(scene, 'pt_' + cat, base, fleck)
     : style === 'office' ? officeTex(scene, 'pt_' + cat, base, fleck)
     : style === 'brick' ? brickTex(scene, 'pt_' + cat, base, fleck)
@@ -351,7 +367,12 @@ export async function loadBsp(scene: B.Scene, bspUrl: string, wadUrl: string | n
 
     const wadKey = g.name.toLowerCase().replace(/^[-+]\d*~?/, '');
     const wadTex = wadTexes.get(wadKey) || wadTexes.get(g.name.toLowerCase());
-    mesh.material = wadTex ? wadTexToMaterial(scene, g.name, wadTex) : procMaterial(scene, categorize(g.name));
+    // светлые бетонные тротуары делаем асфальтом — чтобы двор был сплошь асфальтовый,
+    // без светлых полос посреди дороги (перекрывает даже WAD-текстуру)
+    const forceAsphalt = /sidewlk|sidewalk/.test(wadKey) && (g.kind === 'flat' || g.kind === 'lowkerb');
+    mesh.material = forceAsphalt ? procMaterial(scene, 'asphalt')
+      : wadTex ? wadTexToMaterial(scene, g.name, wadTex)
+      : procMaterial(scene, categorize(g.name));
     // коллизия решается ПО КАЖДОЙ ГРАНИ ещё при разборе (g.kind), а не по агрегату группы —
     // одна и та же текстура (напр. поребрик) может быть и низким бордюром, и высокой стеной
     // в разных местах карты, а агрегированный bbox группы это различие теряет.
