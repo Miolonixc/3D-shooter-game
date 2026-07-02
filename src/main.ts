@@ -886,6 +886,32 @@ async function buildBspMap(): Promise<B.Vector3> {
   vLadder(-21.1, 47.5, 1, 0, 11.3); // на верх коричневого ящика c3a1_crate (запад)
   vLadder(21.1, 51.7, 1, 0, 12.5);  // на галв-крышу out_galv1 (восток)
 
+  // --- предупреждающая разметка на тупиковых стенах (жёлто-чёрные полосы) ---
+  const hazardDt = new B.DynamicTexture('hazardTex', { width: 128, height: 128 }, scene, true);
+  { const ctx = hazardDt.getContext() as any;
+    ctx.fillStyle = '#1a1a1a'; ctx.fillRect(0, 0, 128, 128);
+    ctx.fillStyle = '#e8b93c';
+    for (let i = -128; i < 256; i += 32) { ctx.save(); ctx.translate(i, 0); ctx.rotate(Math.PI / 4);
+      ctx.fillRect(-8, -64, 16, 320); ctx.restore(); }
+    hazardDt.update(); }
+  const hazardMat = new B.StandardMaterial('hazard', scene);
+  hazardMat.diffuseTexture = hazardDt; hazardMat.emissiveColor = new B.Color3(0.35, 0.28, 0.1);
+  hazardMat.specularColor = new B.Color3(0.05, 0.05, 0.05); hazardMat.backFaceCulling = false;
+  // px/py/pz — точка на стене, nx/nz — нормаль (наружу, к игроку); панель ставится вплотную
+  // перед стеной вдоль нормали, развёрнута к игроку — видна издалека, коллизии не имеет.
+  function deadEndMark(px: number, py: number, pz: number, nx: number, nz: number, width = 3.4, height = 2.6) {
+    const p = B.MeshBuilder.CreatePlane('deadend', { width, height }, scene);
+    // отступ 0.1 — заметный запас, иначе неровности/группировка граней стены могут
+    // оказаться чуть впереди панели и перекрыть её (полигон стены не идеально плоский)
+    p.position.set(px + nx * 0.1, py, pz + nz * 0.1);
+    p.rotation.y = Math.atan2(nx, nz);
+    p.material = hazardMat; p.checkCollisions = false; p.isPickable = false;
+    reg(p);
+  }
+  deadEndMark(-49.24, 1.9, -32.64, 0, 1); // тупик у карьера (запад)
+  deadEndMark(0.12, 1.9, -5.76, 0, 1);    // тупик у офисной стены
+  deadEndMark(24.96, 1.9, 7.03, -1, 0);   // тупик у спавна/грузовика
+
   return new B.Vector3(r.spawn.x, r.spawn.y + EYE, r.spawn.z); // камера = точка спавна + рост глаз
 }
 
