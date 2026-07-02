@@ -51,6 +51,26 @@ function exitMonitor() {
   hideMonitorHud();
 }
 
+// --- патрульный «террорист» (декоративный, для CCTV) ---
+interface Patroller { root: B.TransformNode; legL: B.TransformNode; legR: B.TransformNode; armL: B.TransformNode; armR: B.TransformNode; a: B.Vector3; b: B.Vector3; t: number; dir: number; }
+let patroller: Patroller | null = null;
+function updatePatroller(dt: number) {
+  if (!patroller) return;
+  const p = patroller;
+  const dist = B.Vector3.Distance(p.a, p.b);
+  const speed = 0.03; // юниты/кадр (~2 ед/с при 60fps)
+  p.t += (speed / dist) * p.dir * (dt / (1000 / 60));
+  if (p.t >= 1) { p.t = 1; p.dir = -1; }
+  if (p.t <= 0) { p.t = 0; p.dir = 1; }
+  const pos = B.Vector3.Lerp(p.a, p.b, p.t);
+  p.root.position.copyFrom(pos);
+  p.root.rotation.y = Math.atan2((p.dir > 0 ? p.b.x - p.a.x : p.a.x - p.b.x), (p.dir > 0 ? p.b.z - p.a.z : p.a.z - p.b.z));
+  const phase = p.t * dist * 3.2; // фаза шага растёт с пройденным путём
+  const swing = Math.sin(phase) * 0.5;
+  p.legL.rotation.x = swing; p.legR.rotation.x = -swing;
+  p.armL.rotation.x = -swing; p.armR.rotation.x = swing;
+}
+
 // --- материалы ---
 const mat = (name: string, hex: string, spec = 0.04) => {
   const m = new B.StandardMaterial(name, scene);
@@ -778,6 +798,7 @@ scene.onBeforeRenderObservable.add(() => {
   // монитор видеонаблюдения: показать подсказку рядом с грузовиком; пока смотрим камеры —
   // вся остальная игровая логика (физика/стрельба/движение) на паузе
   if (monitorTriggerPos) showMonitorPrompt(!monitorActive && B.Vector3.Distance(camera.position, monitorTriggerPos) < 3.2);
+  updatePatroller(engine.getDeltaTime()); // ходит и пока открыт монитор — иначе замер бы в кадре камеры
   if (monitorActive) return;
 
   const crouching = held.has('ControlLeft') || held.has('ControlRight');
@@ -1006,6 +1027,42 @@ async function buildBspMap(): Promise<B.Vector3> {
   // точка входа в монитор видеонаблюдения — у кабины грузовика, на земле (без залезания на крышу)
   monitorTriggerPos = new B.Vector3(7.6, 1.5, 9.85);
 
+  // --- патрульный «террорист»: низкополигональная фигура, ходит туда-сюда в коридоре у
+  // ворот со стороны моста — попадает в кадр камеры cctvGate ---
+  const skinMat = mat('trrSkin', '#c79a6b', 0.05);
+  const vestDt = new B.DynamicTexture('trrVest', { width: 64, height: 64 }, scene, true);
+  { const ctx = vestDt.getContext() as any;
+    ctx.fillStyle = '#2b2f22'; ctx.fillRect(0, 0, 64, 64);                    // тёмная хаки-куртка
+    ctx.strokeStyle = '#4a4f38'; ctx.lineWidth = 6;
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(64, 64); ctx.stroke();       // ремни крест-накрест
+    ctx.beginPath(); ctx.moveTo(64, 0); ctx.lineTo(0, 64); ctx.stroke();
+    vestDt.update(); }
+  const vestMat = new B.StandardMaterial('trrVestMat', scene);
+  vestMat.diffuseTexture = vestDt; vestMat.specularColor = new B.Color3(0.03, 0.03, 0.03);
+  const maskMat = mat('trrMask', '#1c1c1a', 0.03);   // тёмная балаклава
+  const pantsMat = mat('trrPants', '#2a2a26', 0.03);
+  const bootMat = mat('trrBoot', '#151513', 0.03);
+
+  function buildPatroller(ax: number, az: number, bx: number, bz: number) {
+    const root = new B.TransformNode('terrorist', scene);
+    root.position.set(ax, 0, az);
+    part(root, 'trr_torso', 0.46, 0.62, 0.26, 0, 1.28, 0, vestMat);
+    part(root, 'trr_head', 0.28, 0.28, 0.28, 0, 1.72, 0, maskMat);
+    // плечевой/тазобедренный шарнир — отдельный узел, от него «свисает» конечность (свинг через rotation.x пивота)
+    const shoulderL = new B.TransformNode('trr_shL', scene); shoulderL.parent = root; shoulderL.position.set(-0.32, 1.55, 0);
+    const shoulderR = new B.TransformNode('trr_shR', scene); shoulderR.parent = root; shoulderR.position.set(0.32, 1.55, 0);
+    const hipL = new B.TransformNode('trr_hpL', scene); hipL.parent = root; hipL.position.set(-0.14, 0.95, 0);
+    const hipR = new B.TransformNode('trr_hpR', scene); hipR.parent = root; hipR.position.set(0.14, 0.95, 0);
+    part(shoulderL, 'trr_armL', 0.15, 0.56, 0.15, 0, -0.28, 0, vestMat);
+    part(shoulderR, 'trr_armR', 0.15, 0.56, 0.15, 0, -0.28, 0, vestMat);
+    part(hipL, 'trr_legL', 0.18, 0.5, 0.2, 0, -0.25, 0, pantsMat);
+    part(hipR, 'trr_legR', 0.18, 0.5, 0.2, 0, -0.25, 0, pantsMat);
+    part(hipL, 'trr_bootL', 0.19, 0.12, 0.24, 0, -0.56, 0.03, bootMat);
+    part(hipR, 'trr_bootR', 0.19, 0.12, 0.24, 0, -0.56, 0.03, bootMat);
+    patroller = { root, legL: hipL, legR: hipR, armL: shoulderL, armR: shoulderR, a: new B.Vector3(ax, 0, az), b: new B.Vector3(bx, 0, bz), t: 0, dir: 1 };
+  }
+  buildPatroller(8, 56, 8, 80); // коридор у ворот (мост), x=8, z 56↔80 — прямо в кадре cctvGate
+
   return new B.Vector3(r.spawn.x, r.spawn.y + EYE, r.spawn.z); // камера = точка спавна + рост глаз
 }
 
@@ -1052,6 +1109,7 @@ async function loadMap(i: number) {
   exitMonitor(); // на случай смены карты прямо во время просмотра камер — не оставлять activeCamera на удаляемой cctv-камере
   disposeCctv();
   monitorTriggerPos = null; showMonitorPrompt(false);
+  patroller?.root.dispose(); patroller = null;
   levelMeshes = []; doors.length = 0; footprints.length = 0; targets.length = 0; pickups.length = 0;
   mapGen++; // отменяем отложенные респавны прошлой карты
   // сборка новой
