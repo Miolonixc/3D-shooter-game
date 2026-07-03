@@ -54,7 +54,7 @@ function exitMonitor() {
 }
 
 // --- патрульный «террорист» (декоративный, для CCTV) ---
-interface Patroller { root: B.TransformNode; legL: B.TransformNode; legR: B.TransformNode; armL: B.TransformNode; armR: B.TransformNode; a: B.Vector3; b: B.Vector3; t: number; dir: number; }
+interface Patroller { rig: Humanoid; a: B.Vector3; b: B.Vector3; t: number; dir: number; }
 let patroller: Patroller | null = null;
 function updatePatroller(dt: number) {
   if (!patroller) return;
@@ -65,12 +65,92 @@ function updatePatroller(dt: number) {
   if (p.t >= 1) { p.t = 1; p.dir = -1; }
   if (p.t <= 0) { p.t = 0; p.dir = 1; }
   const pos = B.Vector3.Lerp(p.a, p.b, p.t);
-  p.root.position.copyFrom(pos);
-  p.root.rotation.y = Math.atan2((p.dir > 0 ? p.b.x - p.a.x : p.a.x - p.b.x), (p.dir > 0 ? p.b.z - p.a.z : p.a.z - p.b.z));
-  const phase = p.t * dist * 3.2; // фаза шага растёт с пройденным путём
-  const swing = Math.sin(phase) * 0.5;
-  p.legL.rotation.x = swing; p.legR.rotation.x = -swing;
-  p.armL.rotation.x = -swing; p.armR.rotation.x = swing;
+  p.rig.root.position.copyFrom(pos);
+  p.rig.root.rotation.y = Math.atan2((p.dir > 0 ? p.b.x - p.a.x : p.a.x - p.b.x), (p.dir > 0 ? p.b.z - p.a.z : p.a.z - p.b.z));
+  swingLimbs(p.rig, p.t * dist * 3.2); // фаза шага растёт с пройденным путём
+}
+
+// --- сетевая игра (этап 1: синхронизация позиций через авторитарный WS-сервер) ---
+// N — подключиться/отключиться. Адрес сервера: ?server=wss://... (туннель/VPS для интернета),
+// по умолчанию ws://<хост страницы>:8090/ws (локальный npm run server).
+interface RemotePlayer { rig: Humanoid; tgt: B.Vector3; tgtYaw: number; phase: number; name: string; }
+let net: WebSocket | null = null;
+let netId = '';
+let netLastSend = 0;
+const remotes = new Map<string, RemotePlayer>();
+function netToast(msg: string) { showMapName(msg); } // переиспользуем тост смены карты
+function addRemote(id: string, name: string, x = 0, y = 0, z = 0, yaw = 0) {
+  if (remotes.has(id)) return;
+  const rig = buildHumanoid('netplayer_' + id);
+  rig.root.position.set(x, y, z);
+  remotes.set(id, { rig, tgt: new B.Vector3(x, y, z), tgtYaw: yaw, phase: 0, name });
+}
+function dropRemote(id: string) {
+  const r = remotes.get(id);
+  if (r) { r.rig.root.dispose(); remotes.delete(id); }
+}
+function netDisconnect() {
+  if (net) { try { net.close(); } catch { /* ignore */ } }
+  net = null; netId = '';
+  remotes.forEach((r) => r.rig.root.dispose());
+  remotes.clear();
+}
+function netConnect() {
+  if (net) { netDisconnect(); netToast('🌐 Отключено'); return; } // N — тумблер
+  const q = new URLSearchParams(location.search).get('server');
+  const url = q || ((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.hostname + ':8090/ws');
+  netToast('🌐 Подключение: ' + url);
+  const sock = new WebSocket(url);
+  net = sock;
+  sock.onopen = () => sock.send(JSON.stringify({ t: 'join', name: 'player' }));
+  sock.onmessage = (e) => {
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.t === 'welcome') {
+      netId = m.id;
+      for (const p of m.players) addRemote(p.id, p.name, p.x, p.y, p.z, p.yaw);
+      netToast(`🌐 В игре (игроков: ${m.players.length + 1})`);
+    } else if (m.t === 'joined') {
+      addRemote(m.id, m.name);
+      netToast('🌐 Подключился: ' + m.name);
+    } else if (m.t === 'left') {
+      dropRemote(m.id);
+    } else if (m.t === 'snap') {
+      for (const row of m.p) {
+        const [id, x, y, z, yaw] = row;
+        if (id === netId) continue;
+        const r = remotes.get(id);
+        if (!r) { addRemote(id, '?', x, y, z, yaw); continue; }
+        r.tgt.set(x, y, z); r.tgtYaw = yaw;
+      }
+    } else if (m.t === 'full') {
+      netToast('🌐 Сервер заполнен');
+    }
+  };
+  sock.onclose = () => { if (net === sock) { netDisconnect(); netToast('🌐 Соединение закрыто'); } };
+  sock.onerror = () => { /* onclose придёт следом */ };
+}
+function updateNet(dt: number) {
+  if (!net || net.readyState !== WebSocket.OPEN) return;
+  // отправка своего состояния ~15 Гц (позиция ног = камера минус рост глаз)
+  const now = performance.now();
+  if (now - netLastSend > 66 && netId) {
+    netLastSend = now;
+    net.send(JSON.stringify({ t: 'state', x: +camera.position.x.toFixed(2), y: +(camera.position.y - EYE).toFixed(2), z: +camera.position.z.toFixed(2), yaw: +camera.rotation.y.toFixed(3), c: held.has('ControlLeft') || held.has('ControlRight') }));
+  }
+  // интерполяция чужих игроков к последнему снапшоту (~20 Гц) + анимация шага по скорости
+  const k = Math.min(1, dt / 50);
+  remotes.forEach((r) => {
+    const root = r.rig.root;
+    const before = root.position.clone();
+    B.Vector3.LerpToRef(root.position, r.tgt, k, root.position);
+    let dyaw = r.tgtYaw - root.rotation.y;
+    while (dyaw > Math.PI) dyaw -= 2 * Math.PI;
+    while (dyaw < -Math.PI) dyaw += 2 * Math.PI;
+    root.rotation.y += dyaw * k;
+    const speed = Math.hypot(root.position.x - before.x, root.position.z - before.z);
+    if (speed > 0.002) { r.phase += speed * 3.5; swingLimbs(r.rig, r.phase); }
+    else swingLimbs(r.rig, 0);
+  });
 }
 
 // --- материалы ---
@@ -486,6 +566,53 @@ function part(node: B.TransformNode, n: string, w: number, h: number, d: number,
   return b;
 }
 
+// --- низкополигональный гуманоид (патрульный NPC + удалённые игроки в сетевой игре) ---
+interface Humanoid { root: B.TransformNode; shL: B.TransformNode; shR: B.TransformNode; hipL: B.TransformNode; hipR: B.TransformNode; }
+let humanoidMatsCache: { vest: B.Material; mask: B.Material; pants: B.Material; boot: B.Material } | null = null;
+function humanoidMats() {
+  if (humanoidMatsCache) return humanoidMatsCache;
+  const vestDt = new B.DynamicTexture('trrVest', { width: 64, height: 64 }, scene, true);
+  const ctx = vestDt.getContext() as any;
+  ctx.fillStyle = '#2b2f22'; ctx.fillRect(0, 0, 64, 64);                    // тёмная хаки-куртка
+  ctx.strokeStyle = '#4a4f38'; ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(64, 64); ctx.stroke();       // ремни крест-накрест
+  ctx.beginPath(); ctx.moveTo(64, 0); ctx.lineTo(0, 64); ctx.stroke();
+  vestDt.update();
+  const vest = new B.StandardMaterial('trrVestMat', scene);
+  vest.diffuseTexture = vestDt; vest.specularColor = new B.Color3(0.03, 0.03, 0.03);
+  humanoidMatsCache = {
+    vest,
+    mask: mat('trrMask', '#1c1c1a', 0.03),   // тёмная балаклава
+    pants: mat('trrPants', '#2a2a26', 0.03),
+    boot: mat('trrBoot', '#151513', 0.03),
+  };
+  return humanoidMatsCache;
+}
+function buildHumanoid(name: string): Humanoid {
+  const m = humanoidMats();
+  const root = new B.TransformNode(name, scene);
+  part(root, 'trr_torso', 0.46, 0.62, 0.26, 0, 1.28, 0, m.vest);
+  part(root, 'trr_head', 0.28, 0.28, 0.28, 0, 1.72, 0, m.mask);
+  // плечевой/тазобедренный шарнир — отдельный узел, от него «свисает» конечность (свинг через rotation.x пивота)
+  const shL = new B.TransformNode('trr_shL', scene); shL.parent = root; shL.position.set(-0.32, 1.55, 0);
+  const shR = new B.TransformNode('trr_shR', scene); shR.parent = root; shR.position.set(0.32, 1.55, 0);
+  const hipL = new B.TransformNode('trr_hpL', scene); hipL.parent = root; hipL.position.set(-0.14, 0.95, 0);
+  const hipR = new B.TransformNode('trr_hpR', scene); hipR.parent = root; hipR.position.set(0.14, 0.95, 0);
+  part(shL, 'trr_armL', 0.15, 0.56, 0.15, 0, -0.28, 0, m.vest);
+  part(shR, 'trr_armR', 0.15, 0.56, 0.15, 0, -0.28, 0, m.vest);
+  part(hipL, 'trr_legL', 0.18, 0.5, 0.2, 0, -0.25, 0, m.pants);
+  part(hipR, 'trr_legR', 0.18, 0.5, 0.2, 0, -0.25, 0, m.pants);
+  part(hipL, 'trr_bootL', 0.19, 0.12, 0.24, 0, -0.56, 0.03, m.boot);
+  part(hipR, 'trr_bootR', 0.19, 0.12, 0.24, 0, -0.56, 0.03, m.boot);
+  return { root, shL, shR, hipL, hipR };
+}
+// покачивание конечностей при ходьбе (общее для NPC и сетевых игроков)
+function swingLimbs(h: Humanoid, phase: number, amp = 0.5) {
+  const swing = Math.sin(phase) * amp;
+  h.hipL.rotation.x = swing; h.hipR.rotation.x = -swing;
+  h.shL.rotation.x = -swing; h.shR.rotation.x = swing;
+}
+
 function buildPistol(): Weapon {
   const node = new B.TransformNode('pistol', scene); node.parent = camera;
   const ox = 0.22, oy = -0.2, oz = 0.55;
@@ -680,6 +807,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyR') reload();
   if (e.code === 'KeyM') loadMap(curMap + 1);
   if (e.code === 'KeyP') showPos();   // отладка: показать координаты на экране
+  if (e.code === 'KeyN') netConnect(); // сетевая игра: подключиться/отключиться
   if (e.code === 'KeyE') {
     if (monitorActive) {
       // в мониторе E листает камеры по кругу
@@ -801,6 +929,7 @@ scene.onBeforeRenderObservable.add(() => {
   // вся остальная игровая логика (физика/стрельба/движение) на паузе
   if (monitorTriggerPos) showMonitorPrompt(!monitorActive && B.Vector3.Distance(camera.position, monitorTriggerPos) < 3.2);
   updatePatroller(engine.getDeltaTime()); // ходит и пока открыт монитор — иначе замер бы в кадре камеры
+  updateNet(engine.getDeltaTime());       // сеть тоже живёт при открытом мониторе (чужие игроки в кадре камер)
   if (monitorActive) return;
 
   const crouching = held.has('ControlLeft') || held.has('ControlRight');
@@ -1031,39 +1160,11 @@ async function buildBspMap(): Promise<B.Vector3> {
 
   // --- патрульный «террорист»: низкополигональная фигура, ходит туда-сюда в коридоре у
   // ворот со стороны моста — попадает в кадр камеры cctvGate ---
-  const skinMat = mat('trrSkin', '#c79a6b', 0.05);
-  const vestDt = new B.DynamicTexture('trrVest', { width: 64, height: 64 }, scene, true);
-  { const ctx = vestDt.getContext() as any;
-    ctx.fillStyle = '#2b2f22'; ctx.fillRect(0, 0, 64, 64);                    // тёмная хаки-куртка
-    ctx.strokeStyle = '#4a4f38'; ctx.lineWidth = 6;
-    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(64, 64); ctx.stroke();       // ремни крест-накрест
-    ctx.beginPath(); ctx.moveTo(64, 0); ctx.lineTo(0, 64); ctx.stroke();
-    vestDt.update(); }
-  const vestMat = new B.StandardMaterial('trrVestMat', scene);
-  vestMat.diffuseTexture = vestDt; vestMat.specularColor = new B.Color3(0.03, 0.03, 0.03);
-  const maskMat = mat('trrMask', '#1c1c1a', 0.03);   // тёмная балаклава
-  const pantsMat = mat('trrPants', '#2a2a26', 0.03);
-  const bootMat = mat('trrBoot', '#151513', 0.03);
-
-  function buildPatroller(ax: number, az: number, bx: number, bz: number) {
-    const root = new B.TransformNode('terrorist', scene);
-    root.position.set(ax, 0, az);
-    part(root, 'trr_torso', 0.46, 0.62, 0.26, 0, 1.28, 0, vestMat);
-    part(root, 'trr_head', 0.28, 0.28, 0.28, 0, 1.72, 0, maskMat);
-    // плечевой/тазобедренный шарнир — отдельный узел, от него «свисает» конечность (свинг через rotation.x пивота)
-    const shoulderL = new B.TransformNode('trr_shL', scene); shoulderL.parent = root; shoulderL.position.set(-0.32, 1.55, 0);
-    const shoulderR = new B.TransformNode('trr_shR', scene); shoulderR.parent = root; shoulderR.position.set(0.32, 1.55, 0);
-    const hipL = new B.TransformNode('trr_hpL', scene); hipL.parent = root; hipL.position.set(-0.14, 0.95, 0);
-    const hipR = new B.TransformNode('trr_hpR', scene); hipR.parent = root; hipR.position.set(0.14, 0.95, 0);
-    part(shoulderL, 'trr_armL', 0.15, 0.56, 0.15, 0, -0.28, 0, vestMat);
-    part(shoulderR, 'trr_armR', 0.15, 0.56, 0.15, 0, -0.28, 0, vestMat);
-    part(hipL, 'trr_legL', 0.18, 0.5, 0.2, 0, -0.25, 0, pantsMat);
-    part(hipR, 'trr_legR', 0.18, 0.5, 0.2, 0, -0.25, 0, pantsMat);
-    part(hipL, 'trr_bootL', 0.19, 0.12, 0.24, 0, -0.56, 0.03, bootMat);
-    part(hipR, 'trr_bootR', 0.19, 0.12, 0.24, 0, -0.56, 0.03, bootMat);
-    patroller = { root, legL: hipL, legR: hipR, armL: shoulderL, armR: shoulderR, a: new B.Vector3(ax, 0, az), b: new B.Vector3(bx, 0, bz), t: 0, dir: 1 };
+  {
+    const h = buildHumanoid('terrorist');
+    h.root.position.set(8, 0, 56);
+    patroller = { rig: h, a: new B.Vector3(8, 0, 56), b: new B.Vector3(8, 0, 80), t: 0, dir: 1 };
   }
-  buildPatroller(8, 56, 8, 80); // коридор у ворот (мост), x=8, z 56↔80 — прямо в кадре cctvGate
 
   // --- большие гаражные ворота на въезде с моста (в BSP это просто открытый проём без
   // отдельного объекта-двери — обрамляем его рамой с гофрированной текстурой роллет-ворот) ---
@@ -1140,7 +1241,7 @@ async function loadMap(i: number) {
   exitMonitor(); // на случай смены карты прямо во время просмотра камер — не оставлять activeCamera на удаляемой cctv-камере
   disposeCctv();
   monitorTriggerPos = null; showMonitorPrompt(false); monitorScreenMat = null;
-  patroller?.root.dispose(); patroller = null;
+  patroller?.rig.root.dispose(); patroller = null;
   levelMeshes = []; doors.length = 0; footprints.length = 0; targets.length = 0; pickups.length = 0;
   mapGen++; // отменяем отложенные респавны прошлой карты
   // сборка новой
@@ -1179,4 +1280,4 @@ engine.runRenderLoop(() => scene.render());
 window.addEventListener('resize', () => engine.resize());
 
 // отладка
-(window as any).GAME = { engine, scene, camera, targets, pickups, weapons, fire, switchWeapon, getCur: () => cur, held, footprints, w2m, drawMinimap, MM, MMHALF, MM_SPAN, loadMap, mapDefs, getMap: () => curMap, getMmCenterX: () => mmCenterX, getMmCenterZ: () => mmCenterZ, getMmSpan: () => mmSpan, getBspBounds: () => lastBspMinimap && lastBspMinimap.bounds, mmCanvas };
+(window as any).GAME = { engine, scene, camera, targets, pickups, weapons, fire, switchWeapon, getCur: () => cur, held, footprints, w2m, drawMinimap, MM, MMHALF, MM_SPAN, loadMap, mapDefs, getMap: () => curMap, getMmCenterX: () => mmCenterX, getMmCenterZ: () => mmCenterZ, getMmSpan: () => mmSpan, getBspBounds: () => lastBspMinimap && lastBspMinimap.bounds, mmCanvas, netState: () => ({ connected: !!net, ready: net ? net.readyState : -1, id: netId, remotes: [...remotes.keys()], tgts: [...remotes.values()].map((r) => [r.tgt.x, r.tgt.y, r.tgt.z]) }) };
