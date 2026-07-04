@@ -100,8 +100,10 @@ function netConnect() {
   // сервер один на всех (VPS), а не у каждого свой локальный — поэтому дефолт фиксированный,
   // а не "хост страницы": иначе у того, кто запускает игру локально (npm run dev), клиент
   // пытался бы достучаться до своего же localhost:8090 вместо настоящего сервера.
+  // wss:// через Cloudflare Tunnel (не голый ws://139.28.223.251:8090) — иначе со страницы,
+  // отданной по https (GitHub Pages), браузер блокирует незашифрованный ws: mixed content.
   const q = new URLSearchParams(location.search).get('server');
-  const url = q || 'ws://139.28.223.251:8090/ws';
+  const url = q || 'wss://realtors-dates-classification-industry.trycloudflare.com/ws';
   netToast('🌐 Подключение: ' + url);
   const sock = new WebSocket(url);
   net = sock;
