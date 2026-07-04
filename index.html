@@ -28,8 +28,16 @@
     #deathOverlay .box { text-align: center; }
     #deathOverlay h1 { font-size: 30px; margin: 0 0 8px; color: #ff5a5a; }
     #deathOverlay p { opacity: .85; font-size: 14px; margin: 0; }
+    #scoreboard { display: none; position: fixed; left: 50%; top: 18%; transform: translateX(-50%); z-index: 12;
+      background: rgba(10,10,14,.82); color: #fff; padding: 14px 20px; border-radius: 10px; min-width: 260px;
+      font: 14px system-ui; pointer-events: none; }
+    #scoreboard h2 { margin: 0 0 8px; font-size: 15px; text-align: center; opacity: .85; }
+    #scoreboard .row { display: grid; grid-template-columns: 1fr 40px 40px; gap: 8px; padding: 3px 0; }
+    #scoreboard .row.me { color: #7fd4ff; font-weight: 700; }
+    #scoreboard .row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #scoreboard .row span:not(.nm) { text-align: right; opacity: .8; }
   </style>
-  <script type="module" crossorigin src="./assets/index-jKaEn9_2.js"></script>
+  <script type="module" crossorigin src="./assets/index-BhmgJed2.js"></script>
 </head>
 <body>
   <canvas id="app"></canvas>
@@ -37,9 +45,10 @@
   <div id="kills" class="hud">Убито: 0</div>
   <div id="hp" class="hud">❤ 100</div>
   <div id="ammo" class="hud">Пистолет: 12 / 12</div>
-  <div id="controls" class="hud">WASD/ЦФЫВ — движение · мышь / ←→ — обзор · Ctrl — присед (присед+прыжок = в окно) · ЛКМ — стрелять · 1/2 — оружие · R — перезарядка · Пробел — прыжок · M — карта · N — сетевая игра</div>
+  <div id="controls" class="hud">WASD/ЦФЫВ — движение · мышь / ←→ — обзор · Ctrl — присед (присед+прыжок = в окно) · ЛКМ — стрелять · 1/2 — оружие · R — перезарядка · Пробел — прыжок · M — карта · N — сетевая игра · Tab — счёт</div>
   <div id="dmgFlash"></div>
   <div id="deathOverlay"><div class="box"><h1>💀 Вы погибли</h1><p id="respawnText">Возрождение через 3…</p></div></div>
+  <div id="scoreboard"></div>
   <div id="overlay"><div class="box"><h1>🔫 3D Shooter</h1><p>Кликни, чтобы играть</p></div></div>
 </body>
 </html>
