@@ -142,10 +142,16 @@ ws.attach(server, '/ws', (conn) => {
 });
 
 // снапшоты: компактный массив массивов, только когда есть кому слать
-setInterval(() => {
+const snapTimer = setInterval(() => {
   if (players.size < 2) return;
   const snap = { t: 'snap', p: [...players.entries()].map(([pid, p]) => [pid, +p.x.toFixed(2), +p.y.toFixed(2), +p.z.toFixed(2), +p.yaw.toFixed(3), p.crouch ? 1 : 0]) };
   broadcast(snap);
 }, 1000 / SNAP_HZ);
+snapTimer.unref(); // не держать процесс живым только ради этого таймера (важно для тестов, где сервер стартует/стопается)
 
-server.listen(PORT, () => console.log(`shooter mp server: ws://0.0.0.0:${PORT}/ws (макс. ${MAX_PLAYERS} игроков)`));
+// require.main-гвард — чтобы тесты могли require() этот файл (за players/scoreList
+// и т.п.) не поднимая настоящий листенер на боевом PORT.
+if (require.main === module) {
+  server.listen(PORT, () => console.log(`shooter mp server: ws://0.0.0.0:${PORT}/ws (макс. ${MAX_PLAYERS} игроков)`));
+}
+module.exports = { server, players };

@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "server": "node server/mp-server.cjs"
+    "server": "node server/mp-server.cjs",
+    "test": "node --test"
   },
   "dependencies": {
     "@babylonjs/core": "^7.54.0"
