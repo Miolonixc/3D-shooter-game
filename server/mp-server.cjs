@@ -14,6 +14,8 @@ const MAX_PLAYERS = 8;          // 4+ по требованию, с запасо
 const SNAP_HZ = 20;             // частота рассылки снапшотов
 const MAX_MSG_PER_SEC = 60;     // анти-флуд на соединение
 const NAME_MAX = 16;
+const CHAT_MAX = 140;
+const CHAT_MIN_INTERVAL_MS = 400; // анти-спам чата отдельно от общего флуд-лимита
 const RESPAWN_MS = 3000;
 const MAX_HP = 100;
 // урон по оружию считает сервер (не доверяем числу от клиента) — те же цифры, что в src/main.ts (Weapon)
@@ -34,6 +36,8 @@ function scoreList() {
   return [...players.entries()].map(([id, p]) => [id, p.name, p.kills, p.deaths]);
 }
 function broadcastScore() { broadcast({ t: 'score', list: scoreList() }); }
+// вырезаем управляющие символы (перевод строки и т.п. ломает и консольные логи, и однострочный UI чата)
+function clean(s, max) { return String(s).replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, max); }
 
 const server = http.createServer((req, res) => {
   // health-check/заглушка для туннелей
@@ -45,6 +49,7 @@ ws.attach(server, '/ws', (conn) => {
   let id = null;
   let msgCount = 0;
   let msgWindow = Date.now();
+  let lastChatAt = 0;
 
   conn.onMessage = (raw) => {
     // анти-флуд: окно в 1 секунду
@@ -59,7 +64,7 @@ ws.attach(server, '/ws', (conn) => {
     if (m.t === 'join' && !id) {
       if (players.size >= MAX_PLAYERS) { sendTo(conn, { t: 'full' }); conn.close(); return; }
       id = crypto.randomBytes(4).toString('hex');
-      const name = String(m.name || 'player').slice(0, NAME_MAX);
+      const name = clean(m.name, NAME_MAX) || 'player';
       players.set(id, { conn, name, x: 0, y: 0, z: 0, yaw: 0, crouch: false, hp: MAX_HP, alive: true, kills: 0, deaths: 0 });
       // новичку — его id и список остальных; остальным — уведомление
       sendTo(conn, {
@@ -109,6 +114,19 @@ ws.attach(server, '/ws', (conn) => {
         broadcast({ t: 'dmg', id: m.target, hp: target.hp, by: id });
         console.log(`  ${shooter.name} -> ${target.name}: ${dmg} dmg (hp ${target.hp})`);
       }
+      return;
+    }
+
+    if (m.t === 'chat' && id) {
+      const now2 = Date.now();
+      if (now2 - lastChatAt < CHAT_MIN_INTERVAL_MS) return;
+      const p = players.get(id);
+      if (!p) return;
+      const text = clean(m.text, CHAT_MAX);
+      if (!text) return;
+      lastChatAt = now2;
+      broadcast({ t: 'chat', id, name: p.name, text });
+      console.log(`  💬 ${p.name}: ${text}`);
     }
   };
 

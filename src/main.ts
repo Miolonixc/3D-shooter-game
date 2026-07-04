@@ -10,6 +10,8 @@ const dmgFlashEl = document.getElementById('dmgFlash') as HTMLDivElement;
 const deathOverlayEl = document.getElementById('deathOverlay') as HTMLDivElement;
 const respawnTextEl = document.getElementById('respawnText') as HTMLDivElement;
 const scoreboardEl = document.getElementById('scoreboard') as HTMLDivElement;
+const chatLogEl = document.getElementById('chatLog') as HTMLDivElement;
+const chatInputEl = document.getElementById('chatInput') as HTMLDivElement;
 
 const engine = new B.Engine(canvas, true, { stencil: true, adaptToDeviceRatio: true });
 const scene = new B.Scene(engine);
@@ -126,6 +128,7 @@ function netDisconnect() {
   remotes.clear();
   scoreboard = [];
   if (scoreboardVisible) renderScoreboard();
+  if (chatOpen) closeChat();
 }
 function netUrl() {
   // сервер один на всех (VPS), а не у каждого свой локальный — поэтому дефолт фиксированный,
@@ -177,6 +180,8 @@ function netOpen() {
     } else if (m.t === 'score') {
       scoreboard = m.list.map((row: [string, string, number, number]) => ({ id: row[0], name: row[1], kills: row[2], deaths: row[3] }));
       if (scoreboardVisible) renderScoreboard();
+    } else if (m.t === 'chat') {
+      addChatLine(m.name, m.text);
     }
   };
   // тоннель (Cloudflare quick tunnel) периодически рвёт соединение сам по себе (QUIC keepalive) —
@@ -775,16 +780,49 @@ function hideDeathOverlay() {
 interface ScoreRow { id: string; name: string; kills: number; deaths: number; }
 let scoreboard: ScoreRow[] = [];
 let scoreboardVisible = false;
+function escapeHtml(s: string): string {
+  // имена игроков приходят от сервера, но их текст задаёт клиент (join.name) — экранируем
+  // перед interpolation в innerHTML, иначе имя вида "<img onerror=...>" исполнилось бы как HTML
+  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' } as Record<string, string>)[c]);
+}
 function renderScoreboard() {
   const rows = [...scoreboard].sort((a, b) => b.kills - a.kills);
   scoreboardEl.innerHTML = '<h2>Таблица результатов</h2>' + rows.map((r) => (
-    `<div class="row${r.id === netId ? ' me' : ''}"><span class="nm">${r.name}</span><span>${r.kills}</span><span>${r.deaths}</span></div>`
+    `<div class="row${r.id === netId ? ' me' : ''}"><span class="nm">${escapeHtml(r.name)}</span><span>${r.kills}</span><span>${r.deaths}</span></div>`
   )).join('') || '<p>Нет игроков</p>';
 }
 function toggleScoreboard(show: boolean) {
   scoreboardVisible = show;
   scoreboardEl.style.display = show ? 'block' : 'none';
   if (show) renderScoreboard();
+}
+
+// --- чат (Enter — открыть/отправить, Esc — отмена) ---
+let chatOpen = false;
+let chatBuffer = '';
+function addChatLine(name: string, text: string) {
+  const line = document.createElement('div');
+  line.className = 'chatLine';
+  const nm = document.createElement('span');
+  nm.className = 'nm'; nm.textContent = name + ': ';
+  line.appendChild(nm);
+  line.appendChild(document.createTextNode(text));
+  chatLogEl.appendChild(line);
+  while (chatLogEl.children.length > 6) chatLogEl.removeChild(chatLogEl.firstChild!);
+  setTimeout(() => { line.style.opacity = '0'; setTimeout(() => line.remove(), 500); }, 6000);
+}
+function renderChatInput() {
+  chatInputEl.textContent = '💬 ' + chatBuffer + '▌';
+  chatInputEl.style.display = chatOpen ? 'block' : 'none';
+}
+function openChat() { chatOpen = true; chatBuffer = ''; renderChatInput(); }
+function closeChat() { chatOpen = false; chatBuffer = ''; renderChatInput(); }
+function sendChat() {
+  const text = chatBuffer.trim();
+  if (text && net && net.readyState === WebSocket.OPEN && netId) {
+    net.send(JSON.stringify({ t: 'chat', text: text.slice(0, 140) }));
+  }
+  closeChat();
 }
 
 function switchWeapon(i: number) {
@@ -863,7 +901,7 @@ function sndReload() { blip(150, 0.04, 'square', 0.13); setTimeout(() => blip(23
 // --- стрельба ---
 let recoil = 0, lastShot = 0;
 function fire() {
-  if (!alive) return; // мёртв — ждём респавна от сервера
+  if (!alive || chatOpen) return; // мёртв или печатает в чат — ждём
   if (reloading || cur.ammo <= 0) return;
   const now = performance.now();
   if (now - lastShot < cur.interval) return;
@@ -933,7 +971,7 @@ document.addEventListener('pointerlockchange', () => {
 const locked = () => document.pointerLockElement === canvas;
 
 document.addEventListener('mousemove', (e) => {
-  if (!locked()) return;
+  if (!locked() || chatOpen) return;
   camera.rotation.y += e.movementX * 0.0022;
   camera.rotation.x = Math.max(-1.45, Math.min(1.45, camera.rotation.x + e.movementY * 0.0022));
 });
@@ -947,6 +985,16 @@ let jumpQueued = false;
 const held = new Set<string>();
 const gameKeys = new Set(['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'ControlLeft', 'ControlRight', 'Tab']);
 window.addEventListener('keydown', (e) => {
+  if (chatOpen) {
+    // пока открыт ввод чата — клавиши идут в текст, а не в игру (движение/стрельба/оружие)
+    e.preventDefault();
+    if (e.code === 'Enter') sendChat();
+    else if (e.code === 'Escape') closeChat();
+    else if (e.code === 'Backspace') { chatBuffer = chatBuffer.slice(0, -1); renderChatInput(); }
+    else if (e.key.length === 1 && chatBuffer.length < 140) { chatBuffer += e.key; renderChatInput(); }
+    return;
+  }
+  if (e.code === 'Enter' && netWantConnected) { openChat(); return; } // Enter — открыть чат (только в сети)
   if (gameKeys.has(e.code)) e.preventDefault(); // не скроллить страницу / не триггерить шорткаты
   held.add(e.code);
   if (e.code === 'Space') jumpQueued = true;
@@ -1081,6 +1129,7 @@ scene.onBeforeRenderObservable.add(() => {
   updateNet(engine.getDeltaTime());       // сеть тоже живёт при открытом мониторе (чужие игроки в кадре камер)
   if (monitorActive) return;
   if (!alive) return; // мёртв — камера/физика на паузе до респавна (сервер пришлёт 'respawn')
+  if (chatOpen) return; // печатает в чат — камера/движение на паузе, чтобы не улетел, пока набирает текст
 
   const crouching = held.has('ControlLeft') || held.has('ControlRight');
   const eyeNow = crouching ? 1.05 : EYE; // присед опускает камеру
