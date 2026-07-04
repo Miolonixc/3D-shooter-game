@@ -134,10 +134,12 @@ function netUrl() {
   // сервер один на всех (VPS), а не у каждого свой локальный — поэтому дефолт фиксированный,
   // а не "хост страницы": иначе у того, кто запускает игру локально (npm run dev), клиент
   // пытался бы достучаться до своего же localhost:8090 вместо настоящего сервера.
-  // wss:// через Cloudflare Tunnel (не голый ws://139.28.223.251:8090) — иначе со страницы,
-  // отданной по https (GitHub Pages), браузер блокирует незашифрованный ws: mixed content.
+  // wss:// через Caddy (Let's Encrypt на 139-28-223-251.sslip.io, постоянный адрес — не через
+  // Cloudflare quick tunnel: тот эфемерный и менял адрес при каждом рестарте туннеля, из-за чего
+  // мультиплеер периодически "ломался" без видимой причины). sslip.io просто резолвит поддомен
+  // в IP, зашитый в его имени — бесплатный способ получить домен для валидного TLS без покупки.
   const q = new URLSearchParams(location.search).get('server');
-  return q || 'wss://complexity-favors-marketplace-occupation.trycloudflare.com/ws';
+  return q || 'wss://139-28-223-251.sslip.io/ws';
 }
 function netOpen() {
   const url = netUrl();
