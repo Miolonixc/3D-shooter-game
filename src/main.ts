@@ -5,6 +5,10 @@ const canvas = document.getElementById('app') as HTMLCanvasElement;
 const overlay = document.getElementById('overlay') as HTMLDivElement;
 const ammoEl = document.getElementById('ammo') as HTMLDivElement;
 const killsEl = document.getElementById('kills') as HTMLDivElement;
+const hpEl = document.getElementById('hp') as HTMLDivElement;
+const dmgFlashEl = document.getElementById('dmgFlash') as HTMLDivElement;
+const deathOverlayEl = document.getElementById('deathOverlay') as HTMLDivElement;
+const respawnTextEl = document.getElementById('respawnText') as HTMLDivElement;
 
 const engine = new B.Engine(canvas, true, { stencil: true, adaptToDeviceRatio: true });
 const scene = new B.Scene(engine);
@@ -74,6 +78,8 @@ function updatePatroller(dt: number) {
 // N — подключиться/отключиться. Адрес сервера: ?server=wss://... (туннель/VPS для интернета),
 // по умолчанию ws://<хост страницы>:8090/ws (локальный npm run server).
 interface RemotePlayer { rig: Humanoid; tgt: B.Vector3; tgtYaw: number; phase: number; name: string; }
+let hp = 100, alive = true;
+let respawnAt = 0;
 let net: WebSocket | null = null;
 let netId = '';
 let netLastSend = 0;
@@ -86,11 +92,17 @@ function addRemote(id: string, name: string, x = 0, y = 0, z = 0, yaw = 0) {
   if (remotes.has(id)) return;
   const rig = buildHumanoid('netplayer_' + id);
   rig.root.position.set(x, y, z);
+  // помечаем меши тела метаданными — чтобы raycast стрельбы (fire()) находил, в кого попали
+  for (const m of rig.root.getChildMeshes(false)) m.metadata = { netId: id };
   remotes.set(id, { rig, tgt: new B.Vector3(x, y, z), tgtYaw: yaw, phase: 0, name });
 }
 function dropRemote(id: string) {
   const r = remotes.get(id);
   if (r) { r.rig.root.dispose(); remotes.delete(id); }
+}
+function setRemoteAlive(id: string, isAlive: boolean) {
+  const r = remotes.get(id);
+  if (r) r.rig.root.setEnabled(isAlive);
 }
 function netDisconnect() {
   if (net) { try { net.close(); } catch { /* ignore */ } }
@@ -116,7 +128,8 @@ function netOpen() {
     let m; try { m = JSON.parse(e.data); } catch { return; }
     if (m.t === 'welcome') {
       netId = m.id;
-      for (const p of m.players) addRemote(p.id, p.name, p.x, p.y, p.z, p.yaw);
+      hp = 100; alive = true; hideDeathOverlay(); hud(); // сервер всегда создаёт нового игрока с полным hp
+      for (const p of m.players) { addRemote(p.id, p.name, p.x, p.y, p.z, p.yaw); if (p.alive === false) setRemoteAlive(p.id, false); }
       netToast(`🌐 В игре (игроков: ${m.players.length + 1})`);
     } else if (m.t === 'joined') {
       addRemote(m.id, m.name);
@@ -133,6 +146,17 @@ function netOpen() {
       }
     } else if (m.t === 'full') {
       netToast('🌐 Сервер заполнен');
+    } else if (m.t === 'dmg') {
+      if (m.id === netId) { hp = m.hp; hud(); dmgFlash(); }
+    } else if (m.t === 'kill') {
+      if (m.id === netId) { hp = 0; alive = false; hud(); showDeathOverlay(); }
+      else setRemoteAlive(m.id, false);
+      if (m.by === netId && m.id !== netId) { kills++; hud(); sndKill(); }
+    } else if (m.t === 'respawn') {
+      if (m.id === netId) {
+        hp = 100; alive = true; hud(); hideDeathOverlay();
+        camera.position.copyFrom(spawnPoint); velY = 0; onGround = true;
+      } else setRemoteAlive(m.id, true);
     }
   };
   // тоннель (Cloudflare quick tunnel) периодически рвёт соединение сам по себе (QUIC keepalive) —
@@ -688,8 +712,31 @@ let kills = 0, reloading = false;
 function hud() {
   ammoEl.textContent = reloading ? 'Перезарядка…' : cur.name + ': ' + cur.ammo + ' / ' + cur.mag;
   killsEl.textContent = 'Убито: ' + kills;
+  hpEl.textContent = '❤ ' + hp;
 }
 hud();
+
+// --- ХП/смерть/респавн (PvP, этап 2 сетевой игры — валидирует сервер) ---
+let respawnTimer: number | null = null;
+function dmgFlash() {
+  dmgFlashEl.style.opacity = '1';
+  setTimeout(() => { dmgFlashEl.style.opacity = '0'; }, 250);
+}
+function showDeathOverlay() {
+  deathOverlayEl.style.display = 'flex';
+  let left = 3;
+  respawnTextEl.textContent = `Возрождение через ${left}…`;
+  if (respawnTimer !== null) clearInterval(respawnTimer);
+  respawnTimer = window.setInterval(() => {
+    left--;
+    respawnTextEl.textContent = left > 0 ? `Возрождение через ${left}…` : 'Возрождение…';
+    if (left <= 0 && respawnTimer !== null) { clearInterval(respawnTimer); respawnTimer = null; }
+  }, 1000);
+}
+function hideDeathOverlay() {
+  deathOverlayEl.style.display = 'none';
+  if (respawnTimer !== null) { clearInterval(respawnTimer); respawnTimer = null; }
+}
 
 function switchWeapon(i: number) {
   if (i === wi || i < 0 || i >= weapons.length || reloading) return;
@@ -767,6 +814,7 @@ function sndReload() { blip(150, 0.04, 'square', 0.13); setTimeout(() => blip(23
 // --- стрельба ---
 let recoil = 0, lastShot = 0;
 function fire() {
+  if (!alive) return; // мёртв — ждём респавна от сервера
   if (reloading || cur.ammo <= 0) return;
   const now = performance.now();
   if (now - lastShot < cur.interval) return;
@@ -782,9 +830,25 @@ function fire() {
   if (cur.ammo === 0) reload();
   // хитскан
   const ray = camera.getForwardRay(240);
-  const hit = scene.pickWithRay(ray, (m) => targets.indexOf(m as B.Mesh) !== -1);
+  const hit = scene.pickWithRay(ray, (m) => targets.indexOf(m as B.Mesh) !== -1 || !!(m.metadata && m.metadata.netId));
   if (hit && hit.pickedMesh && hit.pickedPoint) {
-    const t = hit.pickedMesh as B.Mesh;
+    const pickedMesh = hit.pickedMesh as B.Mesh;
+    if (pickedMesh.metadata && pickedMesh.metadata.netId) {
+      // --- живой игрок: урон/смерть/респавн авторитарно считает сервер, здесь только фидбек ---
+      const rid = pickedMesh.metadata.netId as string;
+      const r = remotes.get(rid);
+      const rootY = r ? r.rig.root.position.y : 0;
+      const headshot = hit.pickedPoint.y > rootY + 1.5;
+      const dmg = headshot ? cur.dmgHead : cur.dmgBody;
+      hitMarker(headshot);
+      dmgPopup(hit.pickedPoint, dmg, headshot);
+      sndHit();
+      if (net && net.readyState === WebSocket.OPEN && netId) {
+        net.send(JSON.stringify({ t: 'shoot', target: rid, weapon: cur.name, head: headshot }));
+      }
+      return;
+    }
+    const t = pickedMesh;
     const headshot = hit.pickedPoint.y > t.position.y + 0.45;
     const dmg = headshot ? cur.dmgHead : cur.dmgBody;
     t.metadata.hp -= dmg;
@@ -966,6 +1030,7 @@ scene.onBeforeRenderObservable.add(() => {
   updatePatroller(engine.getDeltaTime()); // ходит и пока открыт монитор — иначе замер бы в кадре камеры
   updateNet(engine.getDeltaTime());       // сеть тоже живёт при открытом мониторе (чужие игроки в кадре камер)
   if (monitorActive) return;
+  if (!alive) return; // мёртв — камера/физика на паузе до респавна (сервер пришлёт 'respawn')
 
   const crouching = held.has('ControlLeft') || held.has('ControlRight');
   const eyeNow = crouching ? 1.05 : EYE; // присед опускает камеру

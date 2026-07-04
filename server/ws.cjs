@@ -192,6 +192,10 @@ function attach(httpServer, path, onConnection) {
       return;
     }
     socket.setNoDelay(true);
+    // Node's http.Server даёт сокету дефолтный idle-таймаут (keepAliveTimeout, обычно 5с) —
+    // после апгрейда до WS он никому не нужен и тихо рвёт связь при кратком затишье
+    // (например, у игрока свернулась вкладка и rAF/отправка state приостановились).
+    socket.setTimeout(0);
 
     const conn = new Conn(socket);
     socket.on('data', (d) => conn._feed(d));
