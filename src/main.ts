@@ -9,6 +9,7 @@ const hpEl = document.getElementById('hp') as HTMLDivElement;
 const dmgFlashEl = document.getElementById('dmgFlash') as HTMLDivElement;
 const deathOverlayEl = document.getElementById('deathOverlay') as HTMLDivElement;
 const respawnTextEl = document.getElementById('respawnText') as HTMLDivElement;
+const scoreboardEl = document.getElementById('scoreboard') as HTMLDivElement;
 
 const engine = new B.Engine(canvas, true, { stencil: true, adaptToDeviceRatio: true });
 const scene = new B.Scene(engine);
@@ -77,7 +78,7 @@ function updatePatroller(dt: number) {
 // --- сетевая игра (этап 1: синхронизация позиций через авторитарный WS-сервер) ---
 // N — подключиться/отключиться. Адрес сервера: ?server=wss://... (туннель/VPS для интернета),
 // по умолчанию ws://<хост страницы>:8090/ws (локальный npm run server).
-interface RemotePlayer { rig: Humanoid; tgt: B.Vector3; tgtYaw: number; phase: number; name: string; }
+interface RemotePlayer { rig: Humanoid; tgt: B.Vector3; tgtYaw: number; phase: number; name: string; label: HTMLDivElement; alive: boolean; }
 let hp = 100, alive = true;
 let respawnAt = 0;
 let net: WebSocket | null = null;
@@ -88,27 +89,43 @@ let netReconnectAttempt = 0;
 let netReconnectTimer: number | null = null;
 const remotes = new Map<string, RemotePlayer>();
 function netToast(msg: string) { showMapName(msg); } // переиспользуем тост смены карты
+function myName(): string {
+  // персональное имя без экрана ввода: генерим один раз и держим в localStorage —
+  // иначе все подключения выглядели бы одинаково как "player" в списке/над головой
+  let n = localStorage.getItem('shooterName');
+  if (!n) { n = 'Player' + Math.floor(1000 + Math.random() * 9000); localStorage.setItem('shooterName', n); }
+  return n;
+}
 function addRemote(id: string, name: string, x = 0, y = 0, z = 0, yaw = 0) {
   if (remotes.has(id)) return;
   const rig = buildHumanoid('netplayer_' + id);
   rig.root.position.set(x, y, z);
   // помечаем меши тела метаданными — чтобы raycast стрельбы (fire()) находил, в кого попали
   for (const m of rig.root.getChildMeshes(false)) m.metadata = { netId: id };
-  remotes.set(id, { rig, tgt: new B.Vector3(x, y, z), tgtYaw: yaw, phase: 0, name });
+  const label = document.createElement('div');
+  label.textContent = name;
+  Object.assign(label.style, {
+    position: 'fixed', transform: 'translate(-50%,-100%)', color: '#fff', font: '700 13px system-ui',
+    textShadow: '0 1px 2px #000', pointerEvents: 'none', zIndex: '3', whiteSpace: 'nowrap', display: 'none',
+  } as any);
+  document.body.appendChild(label);
+  remotes.set(id, { rig, tgt: new B.Vector3(x, y, z), tgtYaw: yaw, phase: 0, name, label, alive: true });
 }
 function dropRemote(id: string) {
   const r = remotes.get(id);
-  if (r) { r.rig.root.dispose(); remotes.delete(id); }
+  if (r) { r.rig.root.dispose(); r.label.remove(); remotes.delete(id); }
 }
 function setRemoteAlive(id: string, isAlive: boolean) {
   const r = remotes.get(id);
-  if (r) r.rig.root.setEnabled(isAlive);
+  if (r) { r.rig.root.setEnabled(isAlive); r.alive = isAlive; }
 }
 function netDisconnect() {
   if (net) { try { net.close(); } catch { /* ignore */ } }
   net = null; netId = '';
-  remotes.forEach((r) => r.rig.root.dispose());
+  remotes.forEach((r) => { r.rig.root.dispose(); r.label.remove(); });
   remotes.clear();
+  scoreboard = [];
+  if (scoreboardVisible) renderScoreboard();
 }
 function netUrl() {
   // сервер один на всех (VPS), а не у каждого свой локальный — поэтому дефолт фиксированный,
@@ -123,7 +140,7 @@ function netOpen() {
   const url = netUrl();
   const sock = new WebSocket(url);
   net = sock;
-  sock.onopen = () => { netReconnectAttempt = 0; sock.send(JSON.stringify({ t: 'join', name: 'player' })); };
+  sock.onopen = () => { netReconnectAttempt = 0; sock.send(JSON.stringify({ t: 'join', name: myName() })); };
   sock.onmessage = (e) => {
     let m; try { m = JSON.parse(e.data); } catch { return; }
     if (m.t === 'welcome') {
@@ -157,6 +174,9 @@ function netOpen() {
         hp = 100; alive = true; hud(); hideDeathOverlay();
         camera.position.copyFrom(spawnPoint); velY = 0; onGround = true;
       } else setRemoteAlive(m.id, true);
+    } else if (m.t === 'score') {
+      scoreboard = m.list.map((row: [string, string, number, number]) => ({ id: row[0], name: row[1], kills: row[2], deaths: row[3] }));
+      if (scoreboardVisible) renderScoreboard();
     }
   };
   // тоннель (Cloudflare quick tunnel) периодически рвёт соединение сам по себе (QUIC keepalive) —
@@ -198,6 +218,8 @@ function updateNet(dt: number) {
   }
   // интерполяция чужих игроков к последнему снапшоту (~20 Гц) + анимация шага по скорости
   const k = Math.min(1, dt / 50);
+  const vp = camera.viewport.toGlobal(canvas.clientWidth, canvas.clientHeight);
+  const fwd = camera.getDirection(B.Vector3.Forward());
   remotes.forEach((r) => {
     const root = r.rig.root;
     const before = root.position.clone();
@@ -209,6 +231,17 @@ function updateNet(dt: number) {
     const speed = Math.hypot(root.position.x - before.x, root.position.z - before.z);
     if (speed > 0.002) { r.phase += speed * 3.5; swingLimbs(r.rig, r.phase); }
     else swingLimbs(r.rig, 0);
+    // имя над головой — билборд-лейбл (DOM), спроецированный из мировых координат
+    const headPos = root.position.add(new B.Vector3(0, 2.05, 0));
+    const toHead = headPos.subtract(camera.position);
+    const inFront = B.Vector3.Dot(fwd, toHead) > 0;
+    if (r.alive && inFront) {
+      const p = B.Vector3.Project(headPos, B.Matrix.IdentityReadOnly, scene.getTransformMatrix(), vp);
+      r.label.style.left = p.x + 'px'; r.label.style.top = p.y + 'px';
+      r.label.style.display = 'block';
+    } else {
+      r.label.style.display = 'none';
+    }
   });
 }
 
@@ -738,6 +771,22 @@ function hideDeathOverlay() {
   if (respawnTimer !== null) { clearInterval(respawnTimer); respawnTimer = null; }
 }
 
+// --- таблица результатов (Tab) — счёт kills/deaths с сервера (этап 3 сетевой игры) ---
+interface ScoreRow { id: string; name: string; kills: number; deaths: number; }
+let scoreboard: ScoreRow[] = [];
+let scoreboardVisible = false;
+function renderScoreboard() {
+  const rows = [...scoreboard].sort((a, b) => b.kills - a.kills);
+  scoreboardEl.innerHTML = '<h2>Таблица результатов</h2>' + rows.map((r) => (
+    `<div class="row${r.id === netId ? ' me' : ''}"><span class="nm">${r.name}</span><span>${r.kills}</span><span>${r.deaths}</span></div>`
+  )).join('') || '<p>Нет игроков</p>';
+}
+function toggleScoreboard(show: boolean) {
+  scoreboardVisible = show;
+  scoreboardEl.style.display = show ? 'block' : 'none';
+  if (show) renderScoreboard();
+}
+
 function switchWeapon(i: number) {
   if (i === wi || i < 0 || i >= weapons.length || reloading) return;
   cur.node.setEnabled(false);
@@ -896,7 +945,7 @@ document.addEventListener('mouseup', () => { mouseDown = false; });
 // Стрелки ←/→ — поворот камеры, Ctrl — присед (вертикаль/движение в render-loop).
 let jumpQueued = false;
 const held = new Set<string>();
-const gameKeys = new Set(['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'ControlLeft', 'ControlRight']);
+const gameKeys = new Set(['Space', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'ControlLeft', 'ControlRight', 'Tab']);
 window.addEventListener('keydown', (e) => {
   if (gameKeys.has(e.code)) e.preventDefault(); // не скроллить страницу / не триггерить шорткаты
   held.add(e.code);
@@ -907,6 +956,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyM') loadMap(curMap + 1);
   if (e.code === 'KeyP') showPos();   // отладка: показать координаты на экране
   if (e.code === 'KeyN') netConnect(); // сетевая игра: подключиться/отключиться
+  if (e.code === 'Tab' && !scoreboardVisible) toggleScoreboard(true); // Tab (зажать) — таблица результатов
   if (e.code === 'KeyE') {
     if (monitorActive) {
       // в мониторе E листает камеры по кругу
@@ -958,7 +1008,7 @@ function showPos() {
   clearTimeout((el as any)._t);
   (el as any)._t = setTimeout(() => { el!.style.opacity = '0'; el!.style.transition = 'opacity .5s'; }, 4000);
 }
-window.addEventListener('keyup', (e) => held.delete(e.code));
+window.addEventListener('keyup', (e) => { held.delete(e.code); if (e.code === 'Tab') toggleScoreboard(false); });
 window.addEventListener('blur', () => held.clear()); // не залипать при потере фокуса
 
 // --- сенсорное управление (телефон) ---

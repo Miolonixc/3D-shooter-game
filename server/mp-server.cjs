@@ -30,6 +30,10 @@ function broadcast(obj, exceptId) {
   const s = JSON.stringify(obj);
   for (const [id, p] of players) if (id !== exceptId) p.conn.send(s);
 }
+function scoreList() {
+  return [...players.entries()].map(([id, p]) => [id, p.name, p.kills, p.deaths]);
+}
+function broadcastScore() { broadcast({ t: 'score', list: scoreList() }); }
 
 const server = http.createServer((req, res) => {
   // health-check/заглушка для туннелей
@@ -64,6 +68,7 @@ ws.attach(server, '/ws', (conn) => {
           .map(([pid, p]) => ({ id: pid, name: p.name, x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: p.hp, alive: p.alive })),
       });
       broadcast({ t: 'joined', id, name }, id);
+      broadcastScore();
       console.log(`+ ${name} (${id}) — игроков: ${players.size}`);
       return;
     }
@@ -91,6 +96,7 @@ ws.attach(server, '/ws', (conn) => {
         target.alive = false;
         shooter.kills++; target.deaths++;
         broadcast({ t: 'kill', id: m.target, by: id });
+        broadcastScore();
         console.log(`x ${shooter.name} убил ${target.name} (${m.head ? 'headshot' : 'body'})`);
         const targetId = m.target;
         setTimeout(() => {
@@ -111,6 +117,7 @@ ws.attach(server, '/ws', (conn) => {
       const name = players.get(id).name;
       players.delete(id);
       broadcast({ t: 'left', id });
+      broadcastScore();
       console.log(`- ${name} (${id}) — игроков: ${players.size}`);
     }
   };
