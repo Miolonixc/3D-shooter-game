@@ -77,6 +77,9 @@ interface RemotePlayer { rig: Humanoid; tgt: B.Vector3; tgtYaw: number; phase: n
 let net: WebSocket | null = null;
 let netId = '';
 let netLastSend = 0;
+let netWantConnected = false; // хочет ли игрок быть онлайн (тумблер N) — отличаем от обрыва связи
+let netReconnectAttempt = 0;
+let netReconnectTimer: number | null = null;
 const remotes = new Map<string, RemotePlayer>();
 function netToast(msg: string) { showMapName(msg); } // переиспользуем тост смены карты
 function addRemote(id: string, name: string, x = 0, y = 0, z = 0, yaw = 0) {
@@ -95,19 +98,20 @@ function netDisconnect() {
   remotes.forEach((r) => r.rig.root.dispose());
   remotes.clear();
 }
-function netConnect() {
-  if (net) { netDisconnect(); netToast('🌐 Отключено'); return; } // N — тумблер
+function netUrl() {
   // сервер один на всех (VPS), а не у каждого свой локальный — поэтому дефолт фиксированный,
   // а не "хост страницы": иначе у того, кто запускает игру локально (npm run dev), клиент
   // пытался бы достучаться до своего же localhost:8090 вместо настоящего сервера.
   // wss:// через Cloudflare Tunnel (не голый ws://139.28.223.251:8090) — иначе со страницы,
   // отданной по https (GitHub Pages), браузер блокирует незашифрованный ws: mixed content.
   const q = new URLSearchParams(location.search).get('server');
-  const url = q || 'wss://realtors-dates-classification-industry.trycloudflare.com/ws';
-  netToast('🌐 Подключение: ' + url);
+  return q || 'wss://realtors-dates-classification-industry.trycloudflare.com/ws';
+}
+function netOpen() {
+  const url = netUrl();
   const sock = new WebSocket(url);
   net = sock;
-  sock.onopen = () => sock.send(JSON.stringify({ t: 'join', name: 'player' }));
+  sock.onopen = () => { netReconnectAttempt = 0; sock.send(JSON.stringify({ t: 'join', name: 'player' })); };
   sock.onmessage = (e) => {
     let m; try { m = JSON.parse(e.data); } catch { return; }
     if (m.t === 'welcome') {
@@ -131,8 +135,34 @@ function netConnect() {
       netToast('🌐 Сервер заполнен');
     }
   };
-  sock.onclose = () => { if (net === sock) { netDisconnect(); netToast('🌐 Соединение закрыто'); } };
+  // тоннель (Cloudflare quick tunnel) периодически рвёт соединение сам по себе (QUIC keepalive) —
+  // без авто-реконнекта игрок молча оставался «один» до следующего ручного нажатия N.
+  sock.onclose = () => {
+    if (net !== sock) return;
+    netDisconnect();
+    if (netWantConnected) {
+      netReconnectAttempt++;
+      const delay = Math.min(10000, 1000 * netReconnectAttempt);
+      netToast(`🌐 Обрыв связи, переподключение через ${Math.round(delay / 1000)} с...`);
+      netReconnectTimer = window.setTimeout(() => { if (netWantConnected) netOpen(); }, delay);
+    } else {
+      netToast('🌐 Отключено');
+    }
+  };
   sock.onerror = () => { /* onclose придёт следом */ };
+}
+function netConnect() {
+  if (netWantConnected) { // N — тумблер: выключить и больше не переподключаться
+    netWantConnected = false;
+    if (netReconnectTimer !== null) { clearTimeout(netReconnectTimer); netReconnectTimer = null; }
+    netDisconnect();
+    netToast('🌐 Отключено');
+    return;
+  }
+  netWantConnected = true;
+  netReconnectAttempt = 0;
+  netToast('🌐 Подключение: ' + netUrl());
+  netOpen();
 }
 function updateNet(dt: number) {
   if (!net || net.readyState !== WebSocket.OPEN) return;
