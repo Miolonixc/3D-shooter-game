@@ -36,8 +36,16 @@
     #scoreboard .row.me { color: #7fd4ff; font-weight: 700; }
     #scoreboard .row .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #scoreboard .row span:not(.nm) { text-align: right; opacity: .8; }
+    #chatLog { position: fixed; left: 16px; bottom: 46px; z-index: 6; width: 360px; max-width: 60vw;
+      display: flex; flex-direction: column; gap: 2px; pointer-events: none; }
+    #chatLog .chatLine { color: #fff; font: 13px system-ui; text-shadow: 0 1px 2px rgba(0,0,0,.8);
+      background: rgba(0,0,0,.35); padding: 2px 6px; border-radius: 4px; transition: opacity .5s; }
+    #chatLog .chatLine .nm { font-weight: 700; color: #7fd4ff; }
+    #chatInput { display: none; position: fixed; left: 16px; bottom: 180px; z-index: 7;
+      color: #fff; font: 14px system-ui; background: rgba(0,0,0,.6); padding: 4px 8px; border-radius: 4px;
+      pointer-events: none; max-width: 60vw; word-break: break-all; }
   </style>
-  <script type="module" crossorigin src="./assets/index-BhmgJed2.js"></script>
+  <script type="module" crossorigin src="./assets/index-CWAzLWUU.js"></script>
 </head>
 <body>
   <canvas id="app"></canvas>
@@ -45,10 +53,12 @@
   <div id="kills" class="hud">Убито: 0</div>
   <div id="hp" class="hud">❤ 100</div>
   <div id="ammo" class="hud">Пистолет: 12 / 12</div>
-  <div id="controls" class="hud">WASD/ЦФЫВ — движение · мышь / ←→ — обзор · Ctrl — присед (присед+прыжок = в окно) · ЛКМ — стрелять · 1/2 — оружие · R — перезарядка · Пробел — прыжок · M — карта · N — сетевая игра · Tab — счёт</div>
+  <div id="controls" class="hud">WASD/ЦФЫВ — движение · мышь / ←→ — обзор · Ctrl — присед (присед+прыжок = в окно) · ЛКМ — стрелять · 1/2 — оружие · R — перезарядка · Пробел — прыжок · M — карта · N — сетевая игра · Tab — счёт · Enter — чат</div>
   <div id="dmgFlash"></div>
   <div id="deathOverlay"><div class="box"><h1>💀 Вы погибли</h1><p id="respawnText">Возрождение через 3…</p></div></div>
   <div id="scoreboard"></div>
+  <div id="chatLog"></div>
+  <div id="chatInput"></div>
   <div id="overlay"><div class="box"><h1>🔫 3D Shooter</h1><p>Кликни, чтобы играть</p></div></div>
 </body>
 </html>
