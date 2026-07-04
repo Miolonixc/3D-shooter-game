@@ -97,8 +97,11 @@ function netDisconnect() {
 }
 function netConnect() {
   if (net) { netDisconnect(); netToast('🌐 Отключено'); return; } // N — тумблер
+  // сервер один на всех (VPS), а не у каждого свой локальный — поэтому дефолт фиксированный,
+  // а не "хост страницы": иначе у того, кто запускает игру локально (npm run dev), клиент
+  // пытался бы достучаться до своего же localhost:8090 вместо настоящего сервера.
   const q = new URLSearchParams(location.search).get('server');
-  const url = q || ((location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.hostname + ':8090/ws');
+  const url = q || 'ws://139.28.223.251:8090/ws';
   netToast('🌐 Подключение: ' + url);
   const sock = new WebSocket(url);
   net = sock;
