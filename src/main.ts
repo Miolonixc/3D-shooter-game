@@ -137,7 +137,7 @@ function netUrl() {
   // wss:// через Cloudflare Tunnel (не голый ws://139.28.223.251:8090) — иначе со страницы,
   // отданной по https (GitHub Pages), браузер блокирует незашифрованный ws: mixed content.
   const q = new URLSearchParams(location.search).get('server');
-  return q || 'wss://realtors-dates-classification-industry.trycloudflare.com/ws';
+  return q || 'wss://complexity-favors-marketplace-occupation.trycloudflare.com/ws';
 }
 function netOpen() {
   const url = netUrl();
