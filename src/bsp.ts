@@ -168,13 +168,22 @@ function shade(hex: string, f: number) {
 // гладкий асфальт: крупные мягкие пятна очень низкого контраста, БЕЗ мелкого зерна —
 // иначе на огромном полу под углом анизотропная фильтрация «зерна» даёт тёмные полосы-штрихи.
 function asphaltTex(scene: B.Scene, name: string, base: string, _dark: string) {
-  const dt = new B.DynamicTexture(name, { width: 256, height: 256 }, scene, true);
+  const S = 256;
+  const dt = new B.DynamicTexture(name, { width: S, height: S }, scene, true);
   const ctx = dt.getContext() as any;
-  ctx.fillStyle = base; ctx.fillRect(0, 0, 256, 256);
+  ctx.fillStyle = base; ctx.fillRect(0, 0, S, S);
   ctx.globalAlpha = 0.45;
+  // wrap-эхо у краёв — см. комментарий в speckleTex: без этого швы тайлов на большом
+  // дворе складываются в регулярные полосы
   for (let i = 0; i < 60; i++) {
     ctx.fillStyle = Math.random() < 0.5 ? shade(base, 1.05) : shade(base, 0.95);
-    ctx.beginPath(); ctx.arc(Math.random() * 256, Math.random() * 256, 8 + Math.random() * 18, 0, 7); ctx.fill();
+    const r = 8 + Math.random() * 18;
+    const x = Math.random() * S, y = Math.random() * S;
+    for (const dx of x < r ? [0, S] : x > S - r ? [0, -S] : [0]) {
+      for (const dy of y < r ? [0, S] : y > S - r ? [0, -S] : [0]) {
+        ctx.beginPath(); ctx.arc(x + dx, y + dy, r, 0, 7); ctx.fill();
+      }
+    }
   }
   ctx.globalAlpha = 1;
   dt.update();
@@ -184,14 +193,23 @@ function speckleTex(scene: B.Scene, name: string, base: string, fleck: string) {
   // деликатное зерно НИЗКОГО контраста: высококонтрастные 2px-точки под скользящим углом
   // давали линии-штрихи (анизотропия), а крупные пятна растягивались по UV в «подтёки».
   // Мелкие точки с малой альфой дают ровную фактуру без обоих артефактов.
-  const dt = new B.DynamicTexture(name, { width: 256, height: 256 }, scene, true);
+  const S = 256;
+  const dt = new B.DynamicTexture(name, { width: S, height: S }, scene, true);
   const ctx = dt.getContext() as any;
-  ctx.fillStyle = base; ctx.fillRect(0, 0, 256, 256);
+  ctx.fillStyle = base; ctx.fillRect(0, 0, S, S);
   ctx.globalAlpha = 0.10;
+  // текстура тайлится много раз на широких стенах — точки у краёв рисуем со «сдвигом-эхом»
+  // на противоположный край (wrap), иначе на каждом стыке тайла виден необёрнутый обрез точки,
+  // и при десятках повторов на всю стену эти швы складываются в регулярные полосы.
   for (let i = 0; i < 900; i++) {
     ctx.fillStyle = Math.random() < 0.5 ? fleck : shade(base, 1.12);
     const r = 1.5 + Math.random() * 2.5;
-    ctx.beginPath(); ctx.arc(Math.random() * 256, Math.random() * 256, r, 0, 7); ctx.fill();
+    const x = Math.random() * S, y = Math.random() * S;
+    for (const dx of x < r ? [0, S] : x > S - r ? [0, -S] : [0]) {
+      for (const dy of y < r ? [0, S] : y > S - r ? [0, -S] : [0]) {
+        ctx.beginPath(); ctx.arc(x + dx, y + dy, r, 0, 7); ctx.fill();
+      }
+    }
   }
   ctx.globalAlpha = 1;
   dt.update();
@@ -431,6 +449,13 @@ function procMaterial(scene: B.Scene, cat: Category): B.Material {
     : style === 'tile' ? tileTex(scene, 'pt_' + cat, base, fleck)
     : speckleTex(scene, 'pt_' + cat, base, fleck);
   dt.anisotropicFilteringLevel = 8; // без этого пол под углом даёт муар/полосы
+  if (style === 'speckle' || style === 'asphalt') {
+    // случайный шум (не структурный узор) на больших стенах повторяется десятки раз — даже
+    // с низким контрастом и wrap-эхом на краях тайла это даёт полосы-алиасинг при минификации
+    // под острым углом (подтверждено экспериментом: подбирал масштаб живьём, 0.08 убирает
+    // полосы полностью, 0.35 и даже 0.15 — ещё частично видно). Растягиваем тайл в ~12 раз реже.
+    dt.uScale = 0.08; dt.vScale = 0.08;
+  }
   mat.diffuseTexture = dt;
   mat.diffuseColor = new B.Color3(1, 1, 1);
   mat.specularColor = new B.Color3(0.04, 0.04, 0.04);
@@ -458,6 +483,32 @@ function wadTexToMaterial(scene: B.Scene, name: string, tex: WadTex): B.Material
   return mat;
 }
 
+// BSP-стены собраны из множества отдельных смежных панелей (граней), не разделяющих вершины
+// между собой — ComputeNormals поэтому даёт каждой панели свою (пусть и почти идентичную)
+// плоскую нормаль. На стыках даже исчезающе малая разница углов превращается эффектом Маха
+// в отчётливые регулярные полосы при боковом освещении. Сглаживаем: для вершин с совпадающей
+// (с точностью до эпсилон) позицией усредняем нормаль — UV/позиции при этом не трогаем, только
+// нормали, так что текстурирование каждой грани остаётся прежним.
+function weldNormalsByPosition(positions: number[], normals: number[]) {
+  const groups = new Map<string, number[]>();
+  const EPS = 100; // округление до ~0.01 юнита (позиции уже в масштабе сцены)
+  for (let i = 0; i < positions.length / 3; i++) {
+    const x = Math.round(positions[i * 3] * EPS), y = Math.round(positions[i * 3 + 1] * EPS), z = Math.round(positions[i * 3 + 2] * EPS);
+    const key = x + ',' + y + ',' + z;
+    let arr = groups.get(key);
+    if (!arr) { arr = []; groups.set(key, arr); }
+    arr.push(i);
+  }
+  for (const idxs of groups.values()) {
+    if (idxs.length < 2) continue;
+    let nx = 0, ny = 0, nz = 0;
+    for (const i of idxs) { nx += normals[i * 3]; ny += normals[i * 3 + 1]; nz += normals[i * 3 + 2]; }
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    for (const i of idxs) { normals[i * 3] = nx; normals[i * 3 + 1] = ny; normals[i * 3 + 2] = nz; }
+  }
+}
+
 export interface BspResult { meshes: B.Mesh[]; spawn: B.Vector3; spawnYaw: number; minimap: HTMLCanvasElement; bounds: { minX: number; maxX: number; minZ: number; maxZ: number }; }
 
 export async function loadBsp(scene: B.Scene, bspUrl: string, wadUrl: string | null, scale: number): Promise<BspResult> {
@@ -482,6 +533,7 @@ export async function loadBsp(scene: B.Scene, bspUrl: string, wadUrl: string | n
     vd.uvs = g.uvs;
     const normals: number[] = [];
     B.VertexData.ComputeNormals(g.positions, g.indices, normals);
+    weldNormalsByPosition(g.positions, normals); // убрать полосы-«эффект Маха» на стыках панелей
     vd.normals = normals;
     vd.applyToMesh(mesh);
 
