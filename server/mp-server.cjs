@@ -18,11 +18,15 @@ const CHAT_MAX = 140;
 const CHAT_MIN_INTERVAL_MS = 400; // анти-спам чата отдельно от общего флуд-лимита
 const RESPAWN_MS = 3000;
 const MAX_HP = 100;
-// урон по оружию считает сервер (не доверяем числу от клиента) — те же цифры, что в src/main.ts (Weapon)
-const WEAPON_DMG = {
-  'Пистолет': { body: 50, head: 100 },
-  'SMG': { body: 24, head: 55 },
+// урон и темп по оружию считает сервер (не доверяем числам от клиента) — те же цифры, что в src/main.ts (Weapon)
+const WEAPON = {
+  'Пистолет': { body: 50, head: 100, interval: 170 },
+  'SMG': { body: 24, head: 55, interval: 75 },
 };
+// минимальный интервал между засчитанными выстрелами: берём самый быстрый ствол минус
+// допуск на сетевой джиттер/буферизацию (клиент мог выстрелить чётко в темп, но пакеты
+// пришли пачкой). Выстрелы чаще — модифицированный клиент, игнорируем (rate limit урона).
+const SHOOT_MIN_INTERVAL_MS = 55;
 
 /** @type {Map<string, {conn: any, name: string, x:number,y:number,z:number,yaw:number,crouch:boolean,hp:number,alive:boolean,kills:number,deaths:number}>} */
 const players = new Map();
@@ -65,7 +69,7 @@ ws.attach(server, '/ws', (conn) => {
       if (players.size >= MAX_PLAYERS) { sendTo(conn, { t: 'full' }); conn.close(); return; }
       id = crypto.randomBytes(4).toString('hex');
       const name = clean(m.name, NAME_MAX) || 'player';
-      players.set(id, { conn, name, x: 0, y: 0, z: 0, yaw: 0, crouch: false, hp: MAX_HP, alive: true, kills: 0, deaths: 0 });
+      players.set(id, { conn, name, x: 0, y: 0, z: 0, yaw: 0, crouch: false, hp: MAX_HP, alive: true, kills: 0, deaths: 0, lastShotAt: 0 });
       // новичку — его id и список остальных; остальным — уведомление
       sendTo(conn, {
         t: 'welcome', id,
@@ -94,7 +98,11 @@ ws.attach(server, '/ws', (conn) => {
       const shooter = players.get(id);
       const target = typeof m.target === 'string' ? players.get(m.target) : null;
       if (!shooter || !target || !shooter.alive || !target.alive || m.target === id) return;
-      const table = WEAPON_DMG[m.weapon] || WEAPON_DMG['Пистолет'];
+      // rate limit урона: выстрелы чаще самого быстрого ствола = чит-клиент, отбрасываем
+      const nowShot = Date.now();
+      if (nowShot - shooter.lastShotAt < SHOOT_MIN_INTERVAL_MS) return;
+      shooter.lastShotAt = nowShot;
+      const table = WEAPON[m.weapon] || WEAPON['Пистолет'];
       const dmg = m.head ? table.head : table.body;
       target.hp = Math.max(0, target.hp - dmg);
       if (target.hp <= 0) {

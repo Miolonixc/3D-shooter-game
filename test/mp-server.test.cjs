@@ -104,6 +104,25 @@ test('body-выстрел: сервер сам считает урон по ор
   } finally { a.sock.destroy(); b.sock.destroy(); }
 });
 
+test('rate limit урона: выстрелы чаще самого быстрого ствола не засчитываются', async () => {
+  const a = connect(), b = connect();
+  await sleep(100);
+  a.send({ t: 'join', name: 'Spammer' });
+  b.send({ t: 'join', name: 'Victim' });
+  await sleep(100);
+  const targetId = last(b, 'welcome').id;
+  // залп из 5 body-выстрелов пистолета подряд (5×50=250 урона хватило бы на 2 смерти),
+  // но SHOOT_MIN_INTERVAL_MS≈55 — засчитаться должен максимум один
+  for (let i = 0; i < 5; i++) a.send({ t: 'shoot', target: targetId, weapon: 'Пистолет', head: false });
+  await sleep(150);
+  try {
+    const dmgs = parsed(b).filter((m) => m.t === 'dmg');
+    const kills = parsed(a).filter((m) => m.t === 'kill');
+    assert.ok(dmgs.length + kills.length <= 1, 'из залпа засчитан максимум один выстрел, а не все пять');
+    if (dmgs.length) assert.equal(dmgs[0].hp, 50, 'один пистолетный body-выстрел = 50 урона');
+  } finally { a.sock.destroy(); b.sock.destroy(); }
+});
+
 test('headshot добивает и запускает респавн', async () => {
   const a = connect(), b = connect();
   await sleep(100);
