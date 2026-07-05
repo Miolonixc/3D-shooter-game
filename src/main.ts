@@ -665,51 +665,526 @@ function part(node: B.TransformNode, n: string, w: number, h: number, d: number,
   return b;
 }
 
-// --- низкополигональный гуманоид (патрульный NPC + удалённые игроки в сетевой игре) ---
-interface Humanoid { root: B.TransformNode; shL: B.TransformNode; shR: B.TransformNode; hipL: B.TransformNode; hipR: B.TransformNode; }
-let humanoidMatsCache: { vest: B.Material; mask: B.Material; pants: B.Material; boot: B.Material } | null = null;
-function humanoidMats() {
-  if (humanoidMatsCache) return humanoidMatsCache;
-  const vestDt = new B.DynamicTexture('trrVest', { width: 64, height: 64 }, scene, true);
-  const ctx = vestDt.getContext() as any;
-  ctx.fillStyle = '#2b2f22'; ctx.fillRect(0, 0, 64, 64);                    // тёмная хаки-куртка
-  ctx.strokeStyle = '#4a4f38'; ctx.lineWidth = 6;
-  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(64, 64); ctx.stroke();       // ремни крест-накрест
-  ctx.beginPath(); ctx.moveTo(64, 0); ctx.lineTo(0, 64); ctx.stroke();
-  vestDt.update();
-  const vest = new B.StandardMaterial('trrVestMat', scene);
-  vest.diffuseTexture = vestDt; vest.specularColor = new B.Color3(0.03, 0.03, 0.03);
-  humanoidMatsCache = {
-    vest,
-    mask: mat('trrMask', '#1c1c1a', 0.03),   // тёмная балаклава
-    pants: mat('trrPants', '#2a2a26', 0.03),
-    boot: mat('trrBoot', '#151513', 0.03),
-  };
-  return humanoidMatsCache;
+// --- низкополигональный гуманоид (боты, заложники, удалённые игроки в сетевой игре) ---
+interface Humanoid { root: B.TransformNode; shL: B.TransformNode; shR: B.TransformNode; hipL: B.TransformNode; hipR: B.TransformNode; flash: B.Mesh | null; }
+type HumanKind = 'terror' | 'ct' | 'hostage';
+interface HumanMats { torso: B.Material; head: B.Material; legs: B.Material; boot: B.Material; extra: B.Material | null; }
+const humanMatsCache: Partial<Record<HumanKind, HumanMats>> = {};
+function humanMats(kind: HumanKind): HumanMats {
+  const cached = humanMatsCache[kind];
+  if (cached) return cached;
+  let m: HumanMats;
+  if (kind === 'terror') {
+    // камуфляжная куртка: случайные пятна трёх оттенков хаки поверх базы
+    const dt = new B.DynamicTexture('trrCamo', { width: 64, height: 64 }, scene, true);
+    const ctx = dt.getContext() as any;
+    ctx.fillStyle = '#3a4030'; ctx.fillRect(0, 0, 64, 64);
+    const spots = ['#2b3524', '#57604a', '#20241c', '#4a4436'];
+    for (let i = 0; i < 42; i++) {
+      ctx.fillStyle = spots[i % spots.length];
+      ctx.beginPath();
+      ctx.ellipse(Math.random() * 64, Math.random() * 64, 4 + Math.random() * 8, 3 + Math.random() * 5, Math.random() * 3, 0, 7);
+      ctx.fill();
+    }
+    dt.update();
+    const torso = new B.StandardMaterial('trrCamoMat', scene);
+    torso.diffuseTexture = dt; torso.specularColor = new B.Color3(0.03, 0.03, 0.03);
+    m = { torso, head: mat('trrMask', '#1c1c1a', 0.03), legs: mat('trrPants', '#2a2a26', 0.03), boot: mat('trrBoot', '#151513', 0.03), extra: mat('trrBand', '#8a2020', 0.05) };
+  } else if (kind === 'ct') {
+    // тёмно-синяя форма с светлыми ремнями разгрузки
+    const dt = new B.DynamicTexture('ctUniform', { width: 64, height: 64 }, scene, true);
+    const ctx = dt.getContext() as any;
+    ctx.fillStyle = '#26324a'; ctx.fillRect(0, 0, 64, 64);
+    ctx.strokeStyle = '#41526e'; ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(16, 0); ctx.lineTo(16, 64); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(48, 0); ctx.lineTo(48, 64); ctx.stroke();
+    ctx.fillStyle = '#8fa3c4'; ctx.fillRect(24, 26, 16, 12); // нагрудная нашивка
+    dt.update();
+    const torso = new B.StandardMaterial('ctUniformMat', scene);
+    torso.diffuseTexture = dt; torso.specularColor = new B.Color3(0.03, 0.03, 0.03);
+    m = { torso, head: mat('ctFace', '#c9a184', 0.03), legs: mat('ctPants', '#202838', 0.03), boot: mat('ctBoot', '#10141a', 0.03), extra: mat('ctHelm', '#39434f', 0.06) };
+  } else {
+    // заложник — гражданский: светлая рубашка, джинсы
+    m = { torso: mat('hosShirt', '#cfc9b4', 0.03), head: mat('hosFace', '#c9a184', 0.03), legs: mat('hosJeans', '#3d4f6e', 0.03), boot: mat('hosShoe', '#4a3a28', 0.03), extra: null };
+  }
+  humanMatsCache[kind] = m;
+  return m;
 }
-function buildHumanoid(name: string): Humanoid {
-  const m = humanoidMats();
+function buildHumanoid(name: string, kind: HumanKind = 'terror'): Humanoid {
+  const m = humanMats(kind);
   const root = new B.TransformNode(name, scene);
-  part(root, 'trr_torso', 0.46, 0.62, 0.26, 0, 1.28, 0, m.vest);
-  part(root, 'trr_head', 0.28, 0.28, 0.28, 0, 1.72, 0, m.mask);
+  part(root, 'h_torso', 0.46, 0.62, 0.26, 0, 1.28, 0, m.torso);
+  part(root, 'h_head', 0.28, 0.28, 0.28, 0, 1.72, 0, m.head);
+  if (kind === 'terror' && m.extra) part(root, 'h_band', 0.30, 0.055, 0.30, 0, 1.81, 0, m.extra);   // красная повязка
+  if (kind === 'ct' && m.extra) part(root, 'h_helm', 0.32, 0.14, 0.32, 0, 1.83, 0, m.extra);        // каска
   // плечевой/тазобедренный шарнир — отдельный узел, от него «свисает» конечность (свинг через rotation.x пивота)
-  const shL = new B.TransformNode('trr_shL', scene); shL.parent = root; shL.position.set(-0.32, 1.55, 0);
-  const shR = new B.TransformNode('trr_shR', scene); shR.parent = root; shR.position.set(0.32, 1.55, 0);
-  const hipL = new B.TransformNode('trr_hpL', scene); hipL.parent = root; hipL.position.set(-0.14, 0.95, 0);
-  const hipR = new B.TransformNode('trr_hpR', scene); hipR.parent = root; hipR.position.set(0.14, 0.95, 0);
-  part(shL, 'trr_armL', 0.15, 0.56, 0.15, 0, -0.28, 0, m.vest);
-  part(shR, 'trr_armR', 0.15, 0.56, 0.15, 0, -0.28, 0, m.vest);
-  part(hipL, 'trr_legL', 0.18, 0.5, 0.2, 0, -0.25, 0, m.pants);
-  part(hipR, 'trr_legR', 0.18, 0.5, 0.2, 0, -0.25, 0, m.pants);
-  part(hipL, 'trr_bootL', 0.19, 0.12, 0.24, 0, -0.56, 0.03, m.boot);
-  part(hipR, 'trr_bootR', 0.19, 0.12, 0.24, 0, -0.56, 0.03, m.boot);
-  return { root, shL, shR, hipL, hipR };
+  const shL = new B.TransformNode('h_shL', scene); shL.parent = root; shL.position.set(-0.32, 1.55, 0);
+  const shR = new B.TransformNode('h_shR', scene); shR.parent = root; shR.position.set(0.32, 1.55, 0);
+  const hipL = new B.TransformNode('h_hpL', scene); hipL.parent = root; hipL.position.set(-0.14, 0.95, 0);
+  const hipR = new B.TransformNode('h_hpR', scene); hipR.parent = root; hipR.position.set(0.14, 0.95, 0);
+  part(shL, 'h_armL', 0.15, 0.56, 0.15, 0, -0.28, 0, m.torso);
+  part(shR, 'h_armR', 0.15, 0.56, 0.15, 0, -0.28, 0, m.torso);
+  part(hipL, 'h_legL', 0.18, 0.5, 0.2, 0, -0.25, 0, m.legs);
+  part(hipR, 'h_legR', 0.18, 0.5, 0.2, 0, -0.25, 0, m.legs);
+  part(hipL, 'h_bootL', 0.19, 0.12, 0.24, 0, -0.56, 0.03, m.boot);
+  part(hipR, 'h_bootR', 0.19, 0.12, 0.24, 0, -0.56, 0.03, m.boot);
+  let flash: B.Mesh | null = null;
+  if (kind !== 'hostage') { // автомат в правой руке (боты им стреляют — вспышка на срезе ствола)
+    part(shR, 'h_gun', 0.07, 0.09, 0.55, 0.02, -0.5, 0.2, bluedMat);
+    part(shR, 'h_gunMag', 0.05, 0.16, 0.09, 0.02, -0.58, 0.12, bluedMat, 0.15);
+    flash = makeFlash(shR, new B.Vector3(0.02, -0.5, 0.52));
+  }
+  return { root, shL, shR, hipL, hipR, flash };
 }
 // покачивание конечностей при ходьбе (общее для NPC и сетевых игроков)
 function swingLimbs(h: Humanoid, phase: number, amp = 0.5) {
   const swing = Math.sin(phase) * amp;
   h.hipL.rotation.x = swing; h.hipR.rotation.x = -swing;
   h.shL.rotation.x = -swing; h.shR.rotation.x = swing;
+}
+
+// ===== режим «Спасение заложников» (PvE, карта BSP) =====
+// Заложники в комнате второго этажа ангара. Террористы охраняют и мешают выводу.
+// E — забрать заложника (идёт следом). Довести до зоны эвакуации (фургон или ворота у моста).
+// B — вызвать бойца-КТ (сам освобождает и ведёт), Shift+B — добавить террориста, H — сложность.
+const DIFFS = [
+  { name: 'Лёгкий', react: 950, acc: 0.35, dmg: 8, interval: 950, speed: 2.2, vision: 17 },
+  { name: 'Средний', react: 550, acc: 0.55, dmg: 14, interval: 650, speed: 2.9, vision: 24 },
+  { name: 'Тяжёлый', react: 280, acc: 0.75, dmg: 22, interval: 430, speed: 3.5, vision: 32 },
+];
+let diffIdx = 1;
+
+// вэйпоинты BSP-карты (координаты сняты пробингом пола лучами): комната на антресоли (3.84) →
+// пандус на восток → коридор (0.96) → ангар (0) → улица в обход зданий → фургон у спавна
+const NAV_P = [
+  new B.Vector3(-8, 3.84, 76),   // 0 комната заложников
+  new B.Vector3(-3, 3.7, 75),    // 1 край антресоли перед пандусом
+  new B.Vector3(2, 2.2, 75),     // 2 середина пандуса
+  new B.Vector3(8, 0.96, 75),    // 3 коридор (запад пандуса)
+  new B.Vector3(10, 0.96, 79),   // 4 конец коридора — ворота у моста (зона)
+  new B.Vector3(8, 0.96, 54),    // 5 юг коридора
+  new B.Vector3(0, 0, 61),       // 6 центр ангара
+  new B.Vector3(8, 0, 49),       // 7 ворота ангара
+  new B.Vector3(8, 0, 30),       // 8 улица (середина)
+  new B.Vector3(5, 0, 14),       // 9 улица (поворот, в обход здания 15.36)
+  new B.Vector3(6, 0, 4),        // 10 юг двора (в обход припаркованных машин x7..15, z8..12)
+  new B.Vector3(16, 0, 6),       // 11 юго-восточный угол у грузовика
+  new B.Vector3(18, 0, 9),       // 12 фургон, зад кузова (зона)
+];
+const NAV_E: [number, number][] = [[0, 1], [1, 2], [2, 3], [3, 4], [3, 5], [5, 6], [5, 7], [6, 7], [7, 8], [8, 9], [9, 10], [10, 11], [11, 12]];
+const NAV_ADJ: number[][] = NAV_P.map(() => []);
+for (const [a, b] of NAV_E) { NAV_ADJ[a].push(b); NAV_ADJ[b].push(a); }
+function nearestNode(p: B.Vector3): number {
+  let best = 0, bd = Infinity;
+  for (let i = 0; i < NAV_P.length; i++) {
+    const n = NAV_P[i];
+    const d = Math.hypot(n.x - p.x, n.z - p.z) + Math.abs(n.y - p.y) * 3; // вес по высоте — не путать этажи
+    if (d < bd) { bd = d; best = i; }
+  }
+  return best;
+}
+function findPath(from: number, to: number): number[] {
+  if (from === to) return [to];
+  const prev = new Array(NAV_P.length).fill(-1);
+  const q = [from]; prev[from] = from;
+  while (q.length) {
+    const v = q.shift()!;
+    for (const w of NAV_ADJ[v]) if (prev[w] === -1) { prev[w] = v; if (w === to) { q.length = 0; break; } q.push(w); }
+  }
+  if (prev[to] === -1) return [];
+  const path = [to];
+  while (path[0] !== from) path.unshift(prev[path[0]]);
+  path.shift(); // текущий узел не нужен
+  return path;
+}
+
+const DOWN = new B.Vector3(0, -1, 0);
+function actorFloorAt(x: number, z: number, fromY: number): number | null {
+  const ray = new B.Ray(new B.Vector3(x, fromY, z), DOWN, 12);
+  const h = scene.pickWithRay(ray, (m) => (m.checkCollisions || (m.metadata && m.metadata.floor)) && targets.indexOf(m as B.Mesh) === -1);
+  return h && h.hit && h.pickedPoint ? h.pickedPoint.y : null;
+}
+function tryStep(root: B.TransformNode, nx: number, nz: number): boolean {
+  const fy = actorFloorAt(nx, nz, root.position.y + 1.6);
+  if (fy === null || fy - root.position.y > 1.05 || root.position.y - fy > 1.5) return false; // стена или обрыв (ступени до ~1, как у игрока)
+  root.position.set(nx, fy, nz); // прилипание к полу — пандусы и ступени проходятся сами
+  return true;
+}
+// шаг актёра к цели по XZ с прилипанием к полу; скольжение вдоль стен по осям. true — дошёл
+function moveActor(root: B.TransformNode, tgt: B.Vector3, speed: number, dt: number): boolean {
+  const dx = tgt.x - root.position.x, dz = tgt.z - root.position.z;
+  const dist = Math.hypot(dx, dz);
+  if (dist < 0.4) return true;
+  const step = Math.min(dist, speed * dt / 1000);
+  const ux = dx / dist, uz = dz / dist;
+  const nx = root.position.x + ux * step;
+  const nz = root.position.z + uz * step;
+  if (!tryStep(root, nx, nz)) {
+    if (!tryStep(root, nx, root.position.z) || Math.abs(ux) < 0.01) {
+      if (!tryStep(root, root.position.x, nz) || Math.abs(uz) < 0.01) {
+        // впереди щель между мешами пола (стык BSP-брашей: луч вниз в никуда)? перешагиваем:
+        // если в ~1.2 юнита по курсу пол есть и перепад допустимый — шагаем сразу туда
+        tryStep(root, root.position.x + ux * 1.2, root.position.z + uz * 1.2);
+      }
+    }
+  }
+  root.rotation.y = Math.atan2(dx, dz);
+  return false;
+}
+// линия видимости: чисто ли между двумя точками (стены = checkCollisions-меши)
+function canSee(from: B.Vector3, to: B.Vector3): boolean {
+  const dir = to.subtract(from);
+  const dist = dir.length();
+  if (dist < 0.5) return true;
+  dir.normalize();
+  const ray = new B.Ray(from, dir, dist - 0.4);
+  const h = scene.pickWithRay(ray, (m) => m.checkCollisions && targets.indexOf(m as B.Mesh) === -1);
+  return !(h && h.hit);
+}
+
+type Team = 'T' | 'CT';
+interface Bot {
+  id: number; team: Team; rig: Humanoid; hp: number; alive: boolean;
+  path: number[];               // оставшиеся вэйпоинты маршрута
+  patrolA: B.Vector3 | null; patrolB: B.Vector3 | null; patrolT: number; patrolDir: number; // сторожевой маршрут (Т)
+  task: 'guard' | 'toHostage' | 'toZone' | 'hunt' | 'idle';
+  escortee: Hostage | null;     // КТ: кого ведёт
+  zoneIdx: number;              // КТ: куда ведёт
+  engageAt: number;             // время, когда можно открыть огонь (реакция по сложности)
+  lastSeen: number;             // когда в последний раз видел врага
+  cooldown: number;             // время следующего выстрела
+  phase: number;                // фаза анимации ходьбы
+  label: HTMLDivElement;
+}
+interface Hostage {
+  rig: Humanoid; state: 'wait' | 'follow' | 'saved';
+  leader: 'player' | Bot | null;
+  phase: number; label: HTMLDivElement;
+}
+const bots: Bot[] = [];
+const hostages: Hostage[] = [];
+let lastRescueTick = performance.now();
+interface RescueZone { pos: B.Vector3; node: number; label: HTMLDivElement; }
+const rescueZones: RescueZone[] = [];
+let botSeq = 1;
+let hostagesTotal = 0, hostagesSaved = 0;
+let rescueResetTimer: number | null = null;
+
+const rescueEl = document.createElement('div');
+rescueEl.className = 'hud';
+Object.assign(rescueEl.style, { top: '62px', left: '16px', font: '600 15px system-ui', color: '#ffd9a0', display: 'none' } as any);
+document.body.appendChild(rescueEl);
+function rescueHud() {
+  rescueEl.style.display = hostagesTotal > 0 ? 'block' : 'none';
+  rescueEl.textContent = `🧍 Заложники: спасено ${hostagesSaved} / ${hostagesTotal}`;
+}
+const hostagePrompt = document.createElement('div');
+hostagePrompt.textContent = 'E — забрать заложника';
+hostagePrompt.style.cssText = 'position:fixed;left:50%;bottom:28%;transform:translateX(-50%);z-index:15;'
+  + 'background:rgba(0,0,0,.55);color:#ffe9b0;font:600 18px system-ui;padding:8px 16px;border-radius:8px;'
+  + 'pointer-events:none;white-space:nowrap;opacity:0;transition:opacity .15s;';
+document.body.appendChild(hostagePrompt);
+
+function makeActorLabel(text: string, color: string): HTMLDivElement {
+  const el = document.createElement('div');
+  el.textContent = text;
+  Object.assign(el.style, {
+    position: 'fixed', transform: 'translate(-50%,-100%)', color, font: '700 12px system-ui',
+    textShadow: '0 1px 2px #000', pointerEvents: 'none', zIndex: '3', whiteSpace: 'nowrap', display: 'none',
+  } as any);
+  document.body.appendChild(el);
+  return el;
+}
+function projectActorLabel(el: HTMLDivElement, headPos: B.Vector3, show: boolean) {
+  if (!show) { el.style.display = 'none'; return; }
+  const fwd = camera.getDirection(B.Vector3.Forward());
+  if (B.Vector3.Dot(fwd, headPos.subtract(camera.position)) <= 0) { el.style.display = 'none'; return; }
+  const vp = camera.viewport.toGlobal(canvas.clientWidth, canvas.clientHeight);
+  const p = B.Vector3.Project(headPos, B.Matrix.IdentityReadOnly, scene.getTransformMatrix(), vp);
+  el.style.left = p.x + 'px'; el.style.top = p.y + 'px';
+  el.style.display = 'block';
+}
+
+function addBot(team: Team, pos: B.Vector3, patrol?: [B.Vector3, B.Vector3]) {
+  const rig = buildHumanoid('bot_' + team + '_' + botSeq, team === 'T' ? 'terror' : 'ct');
+  rig.root.position.copyFrom(pos);
+  const id = botSeq++;
+  for (const m of rig.root.getChildMeshes(false)) m.metadata = { botId: id };
+  const bot: Bot = {
+    id, team, rig, hp: 100, alive: true, path: [],
+    patrolA: patrol ? patrol[0] : null, patrolB: patrol ? patrol[1] : null, patrolT: 0, patrolDir: 1,
+    task: team === 'T' ? (patrol ? 'guard' : 'idle') : 'toHostage',
+    escortee: null, zoneIdx: 0, engageAt: 0, lastSeen: 0, cooldown: 0, phase: 0,
+    label: makeActorLabel(team === 'T' ? 'Террорист' : 'Боец', team === 'T' ? '#ff7a6a' : '#7fd4ff'),
+  };
+  bots.push(bot);
+  return bot;
+}
+function addHostage(pos: B.Vector3) {
+  const rig = buildHumanoid('hostage_' + hostages.length, 'hostage');
+  rig.root.position.copyFrom(pos);
+  const h: Hostage = { rig, state: 'wait', leader: null, phase: 0, label: makeActorLabel('Заложник', '#ffe9b0') };
+  hostages.push(h);
+  hostagesTotal++;
+  return h;
+}
+function damagePlayer(dmg: number) {
+  if (!alive) return;
+  hp = Math.max(0, hp - dmg);
+  dmgFlash(); hud();
+  if (hp <= 0) {
+    alive = false; showDeathOverlay();
+    // локальный PvE-респавн (сервер тут ни при чём — боты живут только на клиенте)
+    window.setTimeout(() => {
+      hp = 100; alive = true; hud(); hideDeathOverlay();
+      camera.position.copyFrom(spawnPoint); velY = 0; onGround = true;
+    }, 3000);
+  }
+}
+function damageBot(bot: Bot, dmg: number, byPlayer: boolean) {
+  if (!bot.alive) return;
+  bot.hp -= dmg;
+  if (bot.hp <= 0) {
+    bot.alive = false;
+    bot.rig.root.rotation.x = -Math.PI / 2; // «упал»
+    bot.rig.root.position.y += 0.25;
+    bot.label.style.display = 'none';
+    if (byPlayer) { kills++; hud(); sndKill(); }
+    // ведомый заложник останавливается и снова ждёт
+    hostages.forEach((h) => { if (h.leader === bot) { h.leader = null; h.state = 'wait'; } });
+    const dead = bot;
+    setTimeout(() => {
+      const i = bots.indexOf(dead);
+      if (i >= 0) bots.splice(i, 1);
+      dead.rig.root.dispose(); dead.label.remove();
+    }, 6000);
+  }
+}
+function tracer(from: B.Vector3, to: B.Vector3) {
+  const len = B.Vector3.Distance(from, to);
+  if (len < 0.5) return;
+  const line = B.MeshBuilder.CreateBox('tracer', { width: 0.03, height: 0.03, depth: len }, scene);
+  line.material = flashMat; line.isPickable = false; line.checkCollisions = false;
+  line.position = B.Vector3.Center(from, to);
+  line.lookAt(to);
+  setTimeout(() => line.dispose(), 55);
+}
+function botShoot(bot: Bot, targetPos: B.Vector3, victim: 'player' | Bot) {
+  const d = DIFFS[diffIdx];
+  bot.cooldown = performance.now() + d.interval * (0.8 + Math.random() * 0.4);
+  if (bot.rig.flash) {
+    bot.rig.flash.setEnabled(true);
+    const f = bot.rig.flash;
+    setTimeout(() => { if (!f.isDisposed()) f.setEnabled(false); }, 50);
+  }
+  const muzzle = bot.rig.root.position.add(new B.Vector3(0, 1.35, 0));
+  const dist = B.Vector3.Distance(muzzle, targetPos);
+  // трассер летит с промахом-разбросом вокруг цели — чем хуже точность, тем шире
+  const spread = (1 - d.acc) * 1.6;
+  const aim = targetPos.add(new B.Vector3((Math.random() - 0.5) * spread, (Math.random() - 0.5) * spread, (Math.random() - 0.5) * spread));
+  tracer(muzzle, aim);
+  const vol = Math.max(0.02, 0.16 - dist * 0.003);
+  noiseBurst(0.07, vol, 1700);
+  const hitChance = d.acc * Math.max(0.25, 1 - dist / d.vision);
+  if (Math.random() < hitChance) {
+    if (victim === 'player') damagePlayer(d.dmg);
+    else damageBot(victim, d.dmg, false);
+  }
+}
+// видимый враг для бота: у Т это игрок и КТ-боты, у КТ — только Т-боты. FOV ~100° при первом обнаружении
+function findEnemy(bot: Bot): { pos: B.Vector3; victim: 'player' | Bot } | null {
+  const d = DIFFS[diffIdx];
+  const eye = bot.rig.root.position.add(new B.Vector3(0, 1.6, 0));
+  const fwd = new B.Vector3(Math.sin(bot.rig.root.rotation.y), 0, Math.cos(bot.rig.root.rotation.y));
+  const engaged = performance.now() - bot.lastSeen < 1500; // уже в бою — крутится к цели без FOV
+  function visible(p: B.Vector3): boolean {
+    const to = p.subtract(eye);
+    const dist = to.length();
+    if (dist > d.vision) return false;
+    if (!engaged) {
+      const flat = new B.Vector3(to.x, 0, to.z).normalize();
+      if (B.Vector3.Dot(fwd, flat) < 0.17) return false; // вне поля зрения (~160° суммарно? нет: cos80°)
+    }
+    return canSee(eye, p);
+  }
+  if (bot.team === 'T' && alive && visible(camera.position)) return { pos: camera.position.clone(), victim: 'player' };
+  for (const other of bots) {
+    if (other.team === bot.team || !other.alive) continue;
+    const p = other.rig.root.position.add(new B.Vector3(0, 1.3, 0));
+    if (visible(p)) return { pos: p, victim: other };
+  }
+  return null;
+}
+function setBotRoute(bot: Bot, targetNode: number) {
+  bot.path = findPath(nearestNode(bot.rig.root.position), targetNode);
+}
+function walkPath(bot: Bot, dt: number): boolean { // true — маршрут пройден
+  const d = DIFFS[diffIdx];
+  while (bot.path.length) {
+    if (moveActor(bot.rig.root, NAV_P[bot.path[0]], d.speed, dt)) { bot.path.shift(); continue; }
+    bot.phase += d.speed * dt / 1000 * 3.2;
+    swingLimbs(bot.rig, bot.phase);
+    return false;
+  }
+  swingLimbs(bot.rig, 0);
+  return true;
+}
+function updateBots(dt: number) {
+  dt = Math.min(dt, 50); // клампим дельту: после фриза/фоновой вкладки большой шаг протуннелил бы бота сквозь стену
+  const now = performance.now();
+  const d = DIFFS[diffIdx];
+  for (const bot of bots) {
+    if (!bot.alive) continue;
+    const root = bot.rig.root;
+    // --- бой: видим врага → стоим и стреляем (после паузы реакции) ---
+    const enemy = findEnemy(bot);
+    if (enemy) {
+      if (now - bot.lastSeen > 1500) bot.engageAt = now + d.react; // впервые заметил — реакция
+      bot.lastSeen = now;
+      root.rotation.y = Math.atan2(enemy.pos.x - root.position.x, enemy.pos.z - root.position.z);
+      swingLimbs(bot.rig, 0);
+      if (now >= bot.engageAt && now >= bot.cooldown) botShoot(bot, enemy.pos, enemy.victim);
+      continue;
+    }
+    // --- задачи ---
+    if (bot.team === 'T') {
+      // идёт охота: заложника ведут — все Т сходятся к нему
+      const escorted = hostages.find((h) => h.state === 'follow');
+      if (escorted) {
+        if (bot.task !== 'hunt' || bot.path.length === 0) {
+          bot.task = 'hunt';
+          setBotRoute(bot, nearestNode(escorted.rig.root.position));
+        }
+        if (walkPath(bot, dt)) { // дошёл до узла — добежать напрямую
+          if (!moveActor(root, escorted.rig.root.position, d.speed, dt)) { bot.phase += d.speed * dt / 1000 * 3.2; swingLimbs(bot.rig, bot.phase); }
+          else swingLimbs(bot.rig, 0);
+        }
+      } else if (bot.task === 'hunt') {
+        bot.task = bot.patrolA ? 'guard' : 'idle'; bot.path = [];
+      } else if (bot.task === 'guard' && bot.patrolA && bot.patrolB) {
+        // сторожевой маршрут туда-сюда (как старый декоративный патрульный)
+        const tgt = bot.patrolDir > 0 ? bot.patrolB : bot.patrolA;
+        if (moveActor(root, tgt, d.speed * 0.6, dt)) bot.patrolDir *= -1;
+        bot.phase += d.speed * 0.6 * dt / 1000 * 3.2;
+        swingLimbs(bot.rig, bot.phase);
+      }
+    } else {
+      // КТ: освободить заложника и вести в зону; нет ждущих — патруль у комнаты
+      if (bot.task === 'toHostage') {
+        const target = hostages.find((h) => h.state === 'wait');
+        if (!target) { bot.task = 'idle'; bot.path = []; continue; }
+        if (walkPath(bot, dt)) {
+          if (moveActor(root, target.rig.root.position, d.speed, dt)) {
+            target.leader = bot; target.state = 'follow';
+            bot.escortee = target;
+            bot.zoneIdx = hostagesSaved % rescueZones.length; // чередуем: мост / фургон
+            bot.task = 'toZone';
+            setBotRoute(bot, rescueZones[bot.zoneIdx].node);
+            netToast('🛡 Боец ведёт заложника');
+          } else { bot.phase += d.speed * dt / 1000 * 3.2; swingLimbs(bot.rig, bot.phase); }
+        }
+      } else if (bot.task === 'toZone') {
+        if (walkPath(bot, dt)) {
+          // у зоны: ждём пока ведомый дойдёт (спасение засчитает updateHostages)
+          if (!bot.escortee || bot.escortee.state !== 'follow') { bot.task = 'toHostage'; bot.escortee = null; setBotRoute(bot, 0); }
+        }
+      } else if (bot.task === 'idle') {
+        if (hostages.some((h) => h.state === 'wait')) { bot.task = 'toHostage'; setBotRoute(bot, 0); }
+      }
+    }
+  }
+}
+function updateHostages(dt: number) {
+  dt = Math.min(dt, 50);
+  let nearWaiting = false;
+  for (const h of hostages) {
+    if (h.state === 'saved') continue;
+    const root = h.rig.root;
+    if (h.state === 'wait') {
+      swingLimbs(h.rig, 0);
+      if (alive && B.Vector3.Distance(camera.position, root.position) < 2.4) nearWaiting = true;
+    } else if (h.state === 'follow') {
+      const leadPos = h.leader === 'player' ? camera.position : h.leader ? h.leader.rig.root.position : root.position;
+      const dist = Math.hypot(leadPos.x - root.position.x, leadPos.z - root.position.z);
+      if (dist > 1.7) {
+        if (!moveActor(root, leadPos, 3.4, dt)) { h.phase += 3.4 * dt / 1000 * 3.2; swingLimbs(h.rig, h.phase); }
+      } else swingLimbs(h.rig, 0);
+      if (h.leader === 'player' && dist > 26) { h.leader = null; h.state = 'wait'; netToast('🧍 Заложник отстал и ждёт'); }
+      // дошёл до зоны эвакуации?
+      for (const z of rescueZones) {
+        if (B.Vector3.Distance(root.position, z.pos) < 2.6) {
+          h.state = 'saved';
+          hostagesSaved++;
+          rescueHud();
+          netToast(`✅ Заложник спасён (${hostagesSaved}/${hostagesTotal})`);
+          h.rig.root.dispose(); h.label.remove();
+          if (hostagesSaved >= hostagesTotal && rescueResetTimer === null) {
+            netToast('🎉 Все заложники спасены! Новая смена через 15 с…');
+            rescueResetTimer = window.setTimeout(() => { rescueResetTimer = null; resetRescueRound(); }, 15000);
+          }
+          break;
+        }
+      }
+    }
+  }
+  hostagePrompt.style.opacity = nearWaiting ? '1' : '0';
+  // подписи над головами
+  for (const bot of bots) projectActorLabel(bot.label, bot.rig.root.position.add(new B.Vector3(0, 2.05, 0)), bot.alive);
+  for (const h of hostages) if (h.state !== 'saved') projectActorLabel(h.label, h.rig.root.position.add(new B.Vector3(0, 2.05, 0)), true);
+  for (const z of rescueZones) projectActorLabel(z.label, z.pos.add(new B.Vector3(0, 1.6, 0)), true);
+}
+function playerTakeHostage(): boolean {
+  if (!alive) return false;
+  for (const h of hostages) {
+    if (h.state === 'wait' && B.Vector3.Distance(camera.position, h.rig.root.position) < 2.4) {
+      h.state = 'follow'; h.leader = 'player';
+      netToast('🧍 Заложник идёт за вами — ведите к зоне эвакуации');
+      return true;
+    }
+  }
+  return false;
+}
+function disposeRescue() {
+  for (const b of bots) { b.rig.root.dispose(); b.label.remove(); }
+  bots.length = 0;
+  for (const h of hostages) { if (h.state !== 'saved') h.rig.root.dispose(); h.label.remove(); }
+  hostages.length = 0;
+  for (const z of rescueZones) z.label.remove();
+  rescueZones.length = 0;
+  hostagesTotal = 0; hostagesSaved = 0;
+  if (rescueResetTimer !== null) { clearTimeout(rescueResetTimer); rescueResetTimer = null; }
+  rescueHud();
+  hostagePrompt.style.opacity = '0';
+}
+function resetRescueRound() {
+  disposeRescue();
+  setupRescue();
+  netToast('🔄 Новая смена заложников');
+}
+function setupRescue() {
+  // заложники в комнате второго этажа
+  addHostage(new B.Vector3(-9.5, 3.84, 78));
+  addHostage(new B.Vector3(-6.5, 3.84, 74));
+  // охрана: один на антресоли у комнаты, один в коридоре (маршрут старого патрульного)
+  addBot('T', new B.Vector3(-10, 3.84, 72), [new B.Vector3(-11, 3.84, 72), new B.Vector3(-4, 3.84, 79)]);
+  addBot('T', new B.Vector3(8, 0.96, 60), [new B.Vector3(8, 0.96, 56), new B.Vector3(8, 0.96, 79)]);
+  // зоны эвакуации: ворота у моста (конец коридора) и фургон у спавна
+  const zoneMat = new B.StandardMaterial('zoneMat', scene);
+  zoneMat.emissiveColor = new B.Color3(0.15, 0.75, 0.3);
+  zoneMat.diffuseColor = new B.Color3(0, 0, 0);
+  zoneMat.alpha = 0.45;
+  zoneMat.disableLighting = true;
+  const mkZone = (pos: B.Vector3, node: number, name: string) => {
+    const disc = B.MeshBuilder.CreateDisc('zone_' + name, { radius: 2.6, tessellation: 28 }, scene);
+    disc.material = zoneMat; disc.rotation.x = Math.PI / 2;
+    disc.position.set(pos.x, pos.y + 0.08, pos.z);
+    disc.isPickable = false; disc.checkCollisions = false;
+    reg(disc);
+    rescueZones.push({ pos, node, label: makeActorLabel('⛑ ' + name, '#7dffa0') });
+  };
+  mkZone(new B.Vector3(10, 0.96, 79), 4, 'Эвакуация: мост');
+  mkZone(new B.Vector3(18, 0, 9), 12, 'Эвакуация: фургон');
+  rescueHud();
 }
 
 function buildPistol(): Weapon {
@@ -919,9 +1394,25 @@ function fire() {
   if (cur.ammo === 0) reload();
   // хитскан
   const ray = camera.getForwardRay(240);
-  const hit = scene.pickWithRay(ray, (m) => targets.indexOf(m as B.Mesh) !== -1 || !!(m.metadata && m.metadata.netId));
+  const hit = scene.pickWithRay(ray, (m) => targets.indexOf(m as B.Mesh) !== -1 || !!(m.metadata && (m.metadata.netId || m.metadata.botId !== undefined)));
   if (hit && hit.pickedMesh && hit.pickedPoint) {
     const pickedMesh = hit.pickedMesh as B.Mesh;
+    if (pickedMesh.metadata && pickedMesh.metadata.botId !== undefined) {
+      // --- бот PvE: у своих (КТ) дружественный огонь выключен ---
+      const bot = bots.find((b) => b.id === pickedMesh.metadata.botId);
+      if (bot && bot.alive) {
+        if (bot.team === 'CT') return; // не бьём союзников
+        const headshot = hit.pickedPoint.y > bot.rig.root.position.y + 1.5;
+        const dmg = headshot ? cur.dmgHead : cur.dmgBody;
+        hitMarker(headshot);
+        dmgPopup(hit.pickedPoint, dmg, headshot);
+        sndHit();
+        damageBot(bot, dmg, true);
+        // получив пулю, охранник сразу «в бою» — развернётся на игрока в updateBots
+        bot.lastSeen = performance.now(); bot.engageAt = performance.now() + DIFFS[diffIdx].react * 0.5;
+      }
+      return;
+    }
     if (pickedMesh.metadata && pickedMesh.metadata.netId) {
       // --- живой игрок: урон/смерть/респавн авторитарно считает сервер, здесь только фидбек ---
       const rid = pickedMesh.metadata.netId as string;
@@ -1014,7 +1505,21 @@ window.addEventListener('keydown', (e) => {
     } else if (monitorTriggerPos && cctvRigs.length && B.Vector3.Distance(camera.position, monitorTriggerPos) < 3.2) {
       monitorActive = true; monitorIdx = 0; scene.activeCamera = cctvRigs[0].cam;
       showMonitorPrompt(false); showMonitorHud(); syncMonitorScreen();
+    } else playerTakeHostage(); // рядом с ждущим заложником — берём с собой
+  }
+  if (e.code === 'KeyB' && hostagesTotal > 0) {
+    // подкрепление: B — боец-КТ (у фургона), Shift+B — террорист (в ангаре)
+    if (e.shiftKey) {
+      if (bots.filter((b) => b.team === 'T').length >= 5) netToast('Террористов уже максимум (5)');
+      else { addBot('T', new B.Vector3(0, 0, 61)); netToast('☠ Террорист прибыл в ангар'); }
+    } else {
+      if (bots.filter((b) => b.team === 'CT').length >= 4) netToast('Бойцов уже максимум (4)');
+      else { const b2 = addBot('CT', new B.Vector3(18, 0, 9)); b2.task = 'toHostage'; setBotRoute(b2, 0); netToast('🛡 Боец-КТ выдвинулся от фургона'); }
     }
+  }
+  if (e.code === 'KeyH' && hostagesTotal > 0) {
+    diffIdx = (diffIdx + 1) % DIFFS.length;
+    netToast('⚙ Сложность ботов: ' + DIFFS[diffIdx].name);
   }
   if (e.code === 'Escape') exitMonitor(); // Esc и так снимает pointer lock — логично им же выйти из монитора
 });
@@ -1129,6 +1634,13 @@ scene.onBeforeRenderObservable.add(() => {
   if (monitorTriggerPos) showMonitorPrompt(!monitorActive && B.Vector3.Distance(camera.position, monitorTriggerPos) < 3.2);
   updatePatroller(engine.getDeltaTime()); // ходит и пока открыт монитор — иначе замер бы в кадре камеры
   updateNet(engine.getDeltaTime());       // сеть тоже живёт при открытом мониторе (чужие игроки в кадре камер)
+  // боты и заложники живут всегда (видны в CCTV); дельту считаем своими часами —
+  // engine.getDeltaTime() равен 0 при ручном scene.render() вне родного цикла (фон/тесты)
+  const rescueNow = performance.now();
+  const rescueDt = Math.min(rescueNow - lastRescueTick, 50);
+  lastRescueTick = rescueNow;
+  updateBots(rescueDt);
+  updateHostages(rescueDt);
   if (monitorActive) return;
   if (!alive) return; // мёртв — камера/физика на паузе до респавна (сервер пришлёт 'respawn')
   if (chatOpen) return; // печатает в чат — камера/движение на паузе, чтобы не улетел, пока набирает текст
@@ -1359,13 +1871,9 @@ async function buildBspMap(): Promise<B.Vector3> {
   // (заходить через открытый зад кузова, х>15.5, коллизии там нет — см. trk_col_* выше)
   monitorTriggerPos = new B.Vector3(12, 1.5, 9);
 
-  // --- патрульный «террорист»: низкополигональная фигура, ходит туда-сюда в коридоре у
-  // ворот со стороны моста — попадает в кадр камеры cctvGate ---
-  {
-    const h = buildHumanoid('terrorist');
-    h.root.position.set(8, 0, 56);
-    patroller = { rig: h, a: new B.Vector3(8, 0, 56), b: new B.Vector3(8, 0, 80), t: 0, dir: 1 };
-  }
+  // --- режим «Спасение заложников»: заложники на втором этаже, охрана-террористы,
+  // зоны эвакуации у моста и у фургона (декоративного патрульного заменили живые боты) ---
+  setupRescue();
 
   // --- большие гаражные ворота на въезде с моста (в BSP это просто открытый проём без
   // отдельного объекта-двери — обрамляем его рамой с гофрированной текстурой роллет-ворот) ---
@@ -1443,6 +1951,7 @@ async function loadMap(i: number) {
   disposeCctv();
   monitorTriggerPos = null; showMonitorPrompt(false); monitorScreenMat = null;
   patroller?.rig.root.dispose(); patroller = null;
+  disposeRescue();
   levelMeshes = []; doors.length = 0; footprints.length = 0; targets.length = 0; pickups.length = 0;
   mapGen++; // отменяем отложенные респавны прошлой карты
   // сборка новой
@@ -1471,7 +1980,7 @@ async function loadMap(i: number) {
   camera.position.copyFrom(spawn);
   camera.rotation.set(0, curMap === 0 ? lastBspYaw : 0, 0); // BSP: смотрим туда, куда указывает info_player_start
   velY = 0; onGround = false;
-  scene.meshes.forEach((m) => { m.refreshBoundingInfo(); m.computeWorldMatrix(true); });
+  scene.meshes.forEach((m) => { m.refreshBoundingInfo(false, false); m.computeWorldMatrix(true); });
   showMapName(mapDefs[curMap].name);
 }
 
@@ -1481,4 +1990,4 @@ engine.runRenderLoop(() => scene.render());
 window.addEventListener('resize', () => engine.resize());
 
 // отладка
-(window as any).GAME = { engine, scene, camera, targets, pickups, weapons, fire, switchWeapon, getCur: () => cur, held, footprints, w2m, drawMinimap, MM, MMHALF, MM_SPAN, loadMap, mapDefs, getMap: () => curMap, getMmCenterX: () => mmCenterX, getMmCenterZ: () => mmCenterZ, getMmSpan: () => mmSpan, getBspBounds: () => lastBspMinimap && lastBspMinimap.bounds, mmCanvas, netState: () => ({ connected: !!net, ready: net ? net.readyState : -1, id: netId, remotes: [...remotes.keys()], tgts: [...remotes.values()].map((r) => [r.tgt.x, r.tgt.y, r.tgt.z]) }) };
+(window as any).GAME = { engine, scene, camera, targets, pickups, weapons, fire, switchWeapon, getCur: () => cur, held, footprints, w2m, drawMinimap, MM, MMHALF, MM_SPAN, loadMap, mapDefs, getMap: () => curMap, getMmCenterX: () => mmCenterX, getMmCenterZ: () => mmCenterZ, getMmSpan: () => mmSpan, getBspBounds: () => lastBspMinimap && lastBspMinimap.bounds, mmCanvas, netState: () => ({ connected: !!net, ready: net ? net.readyState : -1, id: netId, remotes: [...remotes.keys()], tgts: [...remotes.values()].map((r) => [r.tgt.x, r.tgt.y, r.tgt.z]) }), rescueState: () => ({ diff: DIFFS[diffIdx].name, saved: hostagesSaved, total: hostagesTotal, hostages: hostages.map((h) => ({ st: h.state, pos: [h.rig.root.position.x, h.rig.root.position.y, h.rig.root.position.z].map((v) => +v.toFixed(1)), leader: h.leader === 'player' ? 'player' : h.leader ? 'bot' + h.leader.id : null })), bots: bots.map((b) => ({ id: b.id, team: b.team, task: b.task, hp: b.hp, alive: b.alive, path: b.path.slice(), pos: [b.rig.root.position.x, b.rig.root.position.y, b.rig.root.position.z].map((v) => +v.toFixed(1)) })) }), addBot, playerTakeHostage };
