@@ -1,4 +1,4 @@
-import * as B from '@babylonjs/core';
+import * as B from './babylon';
 import { loadBsp } from './bsp';
 
 const canvas = document.getElementById('app') as HTMLCanvasElement;

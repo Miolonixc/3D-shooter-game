@@ -1,4 +1,4 @@
-import * as B from '@babylonjs/core';
+import * as B from './babylon';
 import { parseWad, WadTex } from './wad';
 
 // Загрузчик карт GoldSrc/Half-Life (BSP v30) — Counter-Strike 1.6 формат.

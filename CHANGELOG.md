@@ -5,6 +5,35 @@ TypeScript + Babylon.js + Vite. Формат: новое сверху.
 
 ---
 
+## Оптимизация: tree-shaking Babylon — бандл −74% по gzip (текущая)
+
+### Изменено
+`import * as B from '@babylonjs/core'` тянул ВЕСЬ движок (barrel почти не
+tree-shake'ится): главный чанк был 5.1 МБ (1.14 МБ gzip) — долгая первая
+загрузка, особенно на телефоне. Ввёл `src/babylon.ts` — точечные реэкспорты
+только используемых классов по под-путям (`@babylonjs/core/Meshes/mesh` и
+т.п.); в коде остался `import * as B from './babylon'`, префикс `B.` не
+менялся. Итог: **1.19 МБ (296 КБ gzip), −74%**; шейдеры/лоадеры текстур
+теперь отдельные чанки, грузятся лениво по надобности.
+
+### Исправлено (риск tree-shaking — упущенные side-effects)
+Барр за нас подключал side-effect-модули, регистрирующие методы в прототипах
+Scene/AbstractMesh. Без них — рантайм-падения (компилируется, но ломается).
+Вернул явными импортами то, что реально нужно игре:
+- `Collisions/collisionCoordinator` — `scene.collisionsEnabled` / стены.
+- `Culling/ray` — `scene.pickWithRay` / `camera.getForwardRay` (стрельба, опора).
+- `Culling/Octrees/octreeSceneComponent` — `mesh.createOrUpdateSubmeshesOctree`
+  / `useOctreeForCollisions` для крупных BSP-мешей (иначе сборка карты падала
+  на `createOrUpdateSubmeshesOctree is not a function` — поймано в превью).
+
+### Проверено (превью, все три карты)
+BSP собирается полностью (337 мешей, 46 текстур, 0 битых), город (175) и
+клон (157) — тоже. Стрельба по боту (hp 100→0, kills++), луч опоры (пол
+19.2), 3 CCTV-RTT, collisionCoordinator зарегистрирован, octree на крупных
+мешах (useOctreeForCollisions=true, 4 сабмеша), 60 FPS, ноль ошибок консоли.
+
+---
+
 ## Режим «Спасение заложников»: боты Т/КТ, ИИ, зоны эвакуации (текущая)
 
 ### Добавлено
