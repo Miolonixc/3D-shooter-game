@@ -911,10 +911,13 @@ function makeActorLabel(text: string, color: string): HTMLDivElement {
   document.body.appendChild(el);
   return el;
 }
-function projectActorLabel(el: HTMLDivElement, headPos: B.Vector3, show: boolean) {
+function projectActorLabel(el: HTMLDivElement, headPos: B.Vector3, show: boolean, losCheck = true) {
   if (!show) { el.style.display = 'none'; return; }
   const fwd = camera.getDirection(B.Vector3.Forward());
   if (B.Vector3.Dot(fwd, headPos.subtract(camera.position)) <= 0) { el.style.display = 'none'; return; }
+  // метку NPC видно, только если реально видишь его — нет стены на линии взгляда (не «сквозь текстуры»).
+  // у зон эвакуации losCheck=false: их метка — навигационная подсказка, нужна и сквозь стены.
+  if (losCheck && !canSee(camera.position, headPos)) { el.style.display = 'none'; return; }
   const vp = camera.viewport.toGlobal(canvas.clientWidth, canvas.clientHeight);
   const p = B.Vector3.Project(headPos, B.Matrix.IdentityReadOnly, scene.getTransformMatrix(), vp);
   el.style.left = p.x + 'px'; el.style.top = p.y + 'px';
@@ -1167,7 +1170,7 @@ function updateHostages(dt: number) {
   // подписи над головами
   for (const bot of bots) projectActorLabel(bot.label, bot.rig.root.position.add(new B.Vector3(0, 2.05, 0)), bot.alive);
   for (const h of hostages) if (h.state !== 'saved') projectActorLabel(h.label, h.rig.root.position.add(new B.Vector3(0, 2.05, 0)), true);
-  for (const z of rescueZones) projectActorLabel(z.label, z.pos.add(new B.Vector3(0, 1.6, 0)), true);
+  for (const z of rescueZones) projectActorLabel(z.label, z.pos.add(new B.Vector3(0, 1.6, 0)), true, false);
 }
 function playerTakeHostage(): boolean {
   if (!alive) return false;
