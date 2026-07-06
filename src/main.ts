@@ -238,11 +238,12 @@ function updateNet(dt: number) {
     const speed = Math.hypot(root.position.x - before.x, root.position.z - before.z);
     if (speed > 0.002) { r.phase += speed * 3.5; swingLimbs(r.rig, r.phase); }
     else swingLimbs(r.rig, 0);
-    // имя над головой — билборд-лейбл (DOM), спроецированный из мировых координат
+    // имя над головой — билборд-лейбл (DOM), спроецированный из мировых координат;
+    // видно только при прямой видимости игрока (не сквозь стены), как и метки NPC
     const headPos = root.position.add(new B.Vector3(0, 2.05, 0));
     const toHead = headPos.subtract(camera.position);
     const inFront = B.Vector3.Dot(fwd, toHead) > 0;
-    if (r.alive && inFront) {
+    if (r.alive && inFront && canSee(camera.position, headPos)) {
       const p = B.Vector3.Project(headPos, B.Matrix.IdentityReadOnly, scene.getTransformMatrix(), vp);
       r.label.style.left = p.x + 'px'; r.label.style.top = p.y + 'px';
       r.label.style.display = 'block';
