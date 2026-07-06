@@ -864,8 +864,9 @@ interface Bot {
   task: 'guard' | 'toHostage' | 'toZone' | 'hunt' | 'idle';
   escortee: Hostage | null;     // КТ: кого ведёт
   zoneIdx: number;              // КТ: куда ведёт
-  engageAt: number;             // время, когда можно открыть огонь (реакция по сложности)
-  lastSeen: number;             // когда в последний раз видел врага
+  engageAt: number;             // (не используется) старый таймер реакции
+  aimMs: number;                // накопленное время прицеливания в цель (реакция по сложности)
+  lastSeen: number;             // когда в последний раз видел врага (для alertTerroristsByGunfire)
   cooldown: number;             // время следующего выстрела
   phase: number;                // фаза анимации ходьбы
   stuckMs: number; prevDist: number; // анти-стак: не приближается к вэйпоинту → пропустить его
@@ -930,7 +931,7 @@ function addBot(team: Team, pos: B.Vector3, patrol?: [B.Vector3, B.Vector3]) {
     id, team, rig, hp: 100, alive: true, path: [],
     patrolA: patrol ? patrol[0] : null, patrolB: patrol ? patrol[1] : null, patrolT: 0, patrolDir: 1,
     task: team === 'T' ? (patrol ? 'guard' : 'idle') : 'toHostage',
-    escortee: null, zoneIdx: 0, engageAt: 0, lastSeen: 0, cooldown: 0, phase: 0, stuckMs: 0, prevDist: Infinity,
+    escortee: null, zoneIdx: 0, engageAt: 0, aimMs: 0, lastSeen: 0, cooldown: 0, phase: 0, stuckMs: 0, prevDist: Infinity,
     label: makeActorLabel(team === 'T' ? 'Террорист' : 'Боец', team === 'T' ? '#ff7a6a' : '#7fd4ff'),
   };
   bots.push(bot);
@@ -1018,9 +1019,11 @@ function findEnemy(bot: Bot): { pos: B.Vector3; victim: 'player' | Bot } | null 
     const to = p.subtract(eye);
     const dist = to.length();
     if (dist > d.vision) return false;
-    if (!engaged) {
+    // конус обзора нужен только вдали и вне боя; вблизи (<7) охранник замечает любого рядом,
+    // иначе игрок беспрепятственно проходил у него за спиной к заложникам
+    if (!engaged && dist > 7) {
       const flat = new B.Vector3(to.x, 0, to.z).normalize();
-      if (B.Vector3.Dot(fwd, flat) < 0.17) return false; // вне поля зрения (~160° суммарно? нет: cos80°)
+      if (B.Vector3.Dot(fwd, flat) < 0.17) return false; // ~160° спереди
     }
     return canSee(eye, p);
   }
@@ -1034,6 +1037,15 @@ function findEnemy(bot: Bot): { pos: B.Vector3; victim: 'player' | Bot } | null 
 }
 function setBotRoute(bot: Bot, targetNode: number) {
   bot.path = findPath(nearestNode(bot.rig.root.position), targetNode);
+}
+// выстрел игрока: террористы в радиусе слышимости «настораживаются» — помечаем lastSeen, чтобы
+// findEnemy в этот момент игнорировал конус обзора (engaged) и бот развернулся на игрока
+function alertTerroristsByGunfire() {
+  const now = performance.now();
+  for (const bot of bots) {
+    if (bot.team !== 'T' || !bot.alive) continue;
+    if (B.Vector3.Distance(bot.rig.root.position, camera.position) < 28) bot.lastSeen = now;
+  }
 }
 function walkPath(bot: Bot, dt: number): boolean { // true — маршрут пройден
   const d = DIFFS[diffIdx];
@@ -1059,16 +1071,17 @@ function updateBots(dt: number) {
   for (const bot of bots) {
     if (!bot.alive) continue;
     const root = bot.rig.root;
-    // --- бой: видим врага → стоим и стреляем (после паузы реакции) ---
+    // --- бой: видим врага → стоим, целимся (аккумулятор реакции), стреляем ---
     const enemy = findEnemy(bot);
     if (enemy) {
-      if (now - bot.lastSeen > 1500) bot.engageAt = now + d.react; // впервые заметил — реакция
       bot.lastSeen = now;
+      bot.aimMs += dt;                    // держим цель на прицеле — растёт время прицеливания
       root.rotation.y = Math.atan2(enemy.pos.x - root.position.x, enemy.pos.z - root.position.z);
       swingLimbs(bot.rig, 0);
-      if (now >= bot.engageAt && now >= bot.cooldown) botShoot(bot, enemy.pos, enemy.victim);
+      if (bot.aimMs >= d.react && now >= bot.cooldown) botShoot(bot, enemy.pos, enemy.victim);
       continue;
     }
+    bot.aimMs = Math.max(0, bot.aimMs - dt * 1.5); // потерял из виду — прицел «остывает»
     // --- задачи ---
     if (bot.team === 'T') {
       // идёт охота: заложника ведут — все Т сходятся к нему
@@ -1409,6 +1422,7 @@ function fire() {
   cur.ammo--; hud();
   recoil = cur.recoil;
   sndShoot(cur.name === 'SMG');
+  alertTerroristsByGunfire(); // выстрел слышно — ближние террористы разворачиваются на игрока
   // вспышка
   cur.flash.scaling.setAll(0.7 + Math.random() * 0.7);
   cur.flash.setEnabled(true);
@@ -1432,7 +1446,7 @@ function fire() {
         sndHit();
         damageBot(bot, dmg, true);
         // получив пулю, охранник сразу «в бою» — развернётся на игрока в updateBots
-        bot.lastSeen = performance.now(); bot.engageAt = performance.now() + DIFFS[diffIdx].react * 0.5;
+        bot.lastSeen = performance.now(); bot.aimMs = DIFFS[diffIdx].react * 0.6; // получил пулю — уже почти прицелился, ответит быстрее
       }
       return;
     }
