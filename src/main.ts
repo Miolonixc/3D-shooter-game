@@ -666,7 +666,7 @@ function part(node: B.TransformNode, n: string, w: number, h: number, d: number,
 }
 
 // --- низкополигональный гуманоид (боты, заложники, удалённые игроки в сетевой игре) ---
-interface Humanoid { root: B.TransformNode; shL: B.TransformNode; shR: B.TransformNode; hipL: B.TransformNode; hipR: B.TransformNode; flash: B.Mesh | null; }
+interface Humanoid { root: B.TransformNode; shL: B.TransformNode; shR: B.TransformNode; hipL: B.TransformNode; hipR: B.TransformNode; flash: B.Mesh | null; collider: B.Mesh | null; }
 type HumanKind = 'terror' | 'ct' | 'hostage';
 interface HumanMats { torso: B.Material; head: B.Material; legs: B.Material; boot: B.Material; extra: B.Material | null; }
 const humanMatsCache: Partial<Record<HumanKind, HumanMats>> = {};
@@ -734,7 +734,22 @@ function buildHumanoid(name: string, kind: HumanKind = 'terror'): Humanoid {
     part(shR, 'h_gunMag', 0.05, 0.16, 0.09, 0.02, -0.58, 0.12, bluedMat, 0.15);
     flash = makeFlash(shR, new B.Vector3(0.02, -0.5, 0.52));
   }
-  return { root, shL, shR, hipL, hipR, flash };
+  return { root, shL, shR, hipL, hipR, flash, collider: null };
+}
+// невидимый коллайдер-эллипсоид для актёра (движется через moveWithCollisions — тот же
+// движковый механизм скольжения вдоль стен, что у камеры игрока; самодельный raycast-чек
+// у сложной геометрии (грузовик) ловил стены сбоку и боты ползли/застревали).
+function attachCollider(h: Humanoid): B.Mesh {
+  const col = B.MeshBuilder.CreateBox('actorCol', { size: 0.6 }, scene);
+  col.isVisible = false; col.isPickable = false; col.checkCollisions = true;
+  col.ellipsoid = new B.Vector3(0.45, 0.9, 0.45);
+  col.position.set(h.root.position.x, h.root.position.y + 0.9, h.root.position.z); // сразу в тело актёра
+  h.collider = col;
+  return col;
+}
+function disposeHumanoid(h: Humanoid) {
+  if (h.collider) h.collider.dispose();
+  h.root.dispose();
 }
 // покачивание конечностей при ходьбе (общее для NPC и сетевых игроков)
 function swingLimbs(h: Humanoid, phase: number, amp = 0.5) {
@@ -801,34 +816,33 @@ function findPath(from: number, to: number): number[] {
 const DOWN = new B.Vector3(0, -1, 0);
 function actorFloorAt(x: number, z: number, fromY: number): number | null {
   const ray = new B.Ray(new B.Vector3(x, fromY, z), DOWN, 12);
-  const h = scene.pickWithRay(ray, (m) => (m.checkCollisions || (m.metadata && m.metadata.floor)) && targets.indexOf(m as B.Mesh) === -1);
+  // ВАЖНО: исключаем невидимые коллайдеры актёров (actorCol) — они checkCollisions, и луч вниз
+  // попадал бы в собственный коллайдер (верх ~y1.2), давая ложный «пол» и блокируя шаг.
+  const h = scene.pickWithRay(ray, (m) => (m.checkCollisions || (m.metadata && m.metadata.floor)) && m.name !== 'actorCol' && targets.indexOf(m as B.Mesh) === -1);
   return h && h.hit && h.pickedPoint ? h.pickedPoint.y : null;
 }
-function tryStep(root: B.TransformNode, nx: number, nz: number): boolean {
-  const fy = actorFloorAt(nx, nz, root.position.y + 1.6);
-  if (fy === null || fy - root.position.y > 1.05 || root.position.y - fy > 1.5) return false; // стена или обрыв (ступени до ~1, как у игрока)
-  root.position.set(nx, fy, nz); // прилипание к полу — пандусы и ступени проходятся сами
-  return true;
-}
-// шаг актёра к цели по XZ с прилипанием к полу; скольжение вдоль стен по осям. true — дошёл
-function moveActor(root: B.TransformNode, tgt: B.Vector3, speed: number, dt: number): boolean {
+// шаг актёра к цели по XZ через движковый коллайдер (скольжение вдоль стен) + прилипание к полу
+// (пандусы/ступени/этажи). rig.collider — невидимый эллипсоид с checkCollisions. true — дошёл.
+const COL_CENTER = 0.9; // высота центра эллипсоида над ногами
+function moveActor(rig: Humanoid, tgt: B.Vector3, speed: number, dt: number): boolean {
+  const root = rig.root;
   const dx = tgt.x - root.position.x, dz = tgt.z - root.position.z;
   const dist = Math.hypot(dx, dz);
-  if (dist < 0.4) return true;
-  const step = Math.min(dist, speed * dt / 1000);
-  const ux = dx / dist, uz = dz / dist;
-  const nx = root.position.x + ux * step;
-  const nz = root.position.z + uz * step;
-  if (!tryStep(root, nx, nz)) {
-    if (!tryStep(root, nx, root.position.z) || Math.abs(ux) < 0.01) {
-      if (!tryStep(root, root.position.x, nz) || Math.abs(uz) < 0.01) {
-        // впереди щель между мешами пола (стык BSP-брашей: луч вниз в никуда)? перешагиваем:
-        // если в ~1.2 юнита по курсу пол есть и перепад допустимый — шагаем сразу туда
-        tryStep(root, root.position.x + ux * 1.2, root.position.z + uz * 1.2);
-      }
-    }
-  }
+  if (dist < 0.5) return true;
   root.rotation.y = Math.atan2(dx, dz);
+  const col = rig.collider;
+  if (!col) return false;
+  const step = Math.min(dist, speed * dt / 1000);
+  // ставим коллайдер в тело актёра и двигаем горизонтально — движок сам блокирует/скользит по стенам
+  col.position.set(root.position.x, root.position.y + COL_CENTER, root.position.z);
+  col.computeWorldMatrix(true);
+  col.moveWithCollisions(new B.Vector3((dx / dist) * step, 0, (dz / dist) * step));
+  const nx = col.position.x, nz = col.position.z;
+  // прилипание к полу под новой позицией (пандус/ступень/этаж); нет пола или большой перепад — не идём туда
+  const fy = actorFloorAt(nx, nz, root.position.y + 1.6);
+  if (fy !== null && fy - root.position.y <= 1.05 && root.position.y - fy <= 1.6) {
+    root.position.set(nx, fy, nz);
+  }
   return false;
 }
 // линия видимости: чисто ли между двумя точками (стены = checkCollisions-меши)
@@ -838,7 +852,7 @@ function canSee(from: B.Vector3, to: B.Vector3): boolean {
   if (dist < 0.5) return true;
   dir.normalize();
   const ray = new B.Ray(from, dir, dist - 0.4);
-  const h = scene.pickWithRay(ray, (m) => m.checkCollisions && targets.indexOf(m as B.Mesh) === -1);
+  const h = scene.pickWithRay(ray, (m) => m.checkCollisions && m.name !== 'actorCol' && targets.indexOf(m as B.Mesh) === -1);
   return !(h && h.hit);
 }
 
@@ -854,6 +868,7 @@ interface Bot {
   lastSeen: number;             // когда в последний раз видел врага
   cooldown: number;             // время следующего выстрела
   phase: number;                // фаза анимации ходьбы
+  stuckMs: number; prevDist: number; // анти-стак: не приближается к вэйпоинту → пропустить его
   label: HTMLDivElement;
 }
 interface Hostage {
@@ -908,13 +923,14 @@ function projectActorLabel(el: HTMLDivElement, headPos: B.Vector3, show: boolean
 function addBot(team: Team, pos: B.Vector3, patrol?: [B.Vector3, B.Vector3]) {
   const rig = buildHumanoid('bot_' + team + '_' + botSeq, team === 'T' ? 'terror' : 'ct');
   rig.root.position.copyFrom(pos);
+  attachCollider(rig);
   const id = botSeq++;
   for (const m of rig.root.getChildMeshes(false)) m.metadata = { botId: id };
   const bot: Bot = {
     id, team, rig, hp: 100, alive: true, path: [],
     patrolA: patrol ? patrol[0] : null, patrolB: patrol ? patrol[1] : null, patrolT: 0, patrolDir: 1,
     task: team === 'T' ? (patrol ? 'guard' : 'idle') : 'toHostage',
-    escortee: null, zoneIdx: 0, engageAt: 0, lastSeen: 0, cooldown: 0, phase: 0,
+    escortee: null, zoneIdx: 0, engageAt: 0, lastSeen: 0, cooldown: 0, phase: 0, stuckMs: 0, prevDist: Infinity,
     label: makeActorLabel(team === 'T' ? 'Террорист' : 'Боец', team === 'T' ? '#ff7a6a' : '#7fd4ff'),
   };
   bots.push(bot);
@@ -923,6 +939,7 @@ function addBot(team: Team, pos: B.Vector3, patrol?: [B.Vector3, B.Vector3]) {
 function addHostage(pos: B.Vector3) {
   const rig = buildHumanoid('hostage_' + hostages.length, 'hostage');
   rig.root.position.copyFrom(pos);
+  attachCollider(rig);
   const h: Hostage = { rig, state: 'wait', leader: null, phase: 0, label: makeActorLabel('Заложник', '#ffe9b0') };
   hostages.push(h);
   hostagesTotal++;
@@ -956,7 +973,7 @@ function damageBot(bot: Bot, dmg: number, byPlayer: boolean) {
     setTimeout(() => {
       const i = bots.indexOf(dead);
       if (i >= 0) bots.splice(i, 1);
-      dead.rig.root.dispose(); dead.label.remove();
+      disposeHumanoid(dead.rig); dead.label.remove();
     }, 6000);
   }
 }
@@ -1021,7 +1038,13 @@ function setBotRoute(bot: Bot, targetNode: number) {
 function walkPath(bot: Bot, dt: number): boolean { // true — маршрут пройден
   const d = DIFFS[diffIdx];
   while (bot.path.length) {
-    if (moveActor(bot.rig.root, NAV_P[bot.path[0]], d.speed, dt)) { bot.path.shift(); continue; }
+    const tgt = NAV_P[bot.path[0]];
+    if (moveActor(bot.rig, tgt, d.speed, dt)) { bot.path.shift(); bot.stuckMs = 0; bot.prevDist = Infinity; continue; }
+    // анти-стак: если к текущему вэйпоинту не приближаемся ~1.5с (уступ/угол/огрех графа) — пропускаем его
+    const dist = Math.hypot(tgt.x - bot.rig.root.position.x, tgt.z - bot.rig.root.position.z);
+    if (dist < bot.prevDist - 0.03) { bot.stuckMs = 0; } else { bot.stuckMs += dt; }
+    bot.prevDist = dist;
+    if (bot.stuckMs > 1500) { bot.path.shift(); bot.stuckMs = 0; bot.prevDist = Infinity; continue; }
     bot.phase += d.speed * dt / 1000 * 3.2;
     swingLimbs(bot.rig, bot.phase);
     return false;
@@ -1056,7 +1079,7 @@ function updateBots(dt: number) {
           setBotRoute(bot, nearestNode(escorted.rig.root.position));
         }
         if (walkPath(bot, dt)) { // дошёл до узла — добежать напрямую
-          if (!moveActor(root, escorted.rig.root.position, d.speed, dt)) { bot.phase += d.speed * dt / 1000 * 3.2; swingLimbs(bot.rig, bot.phase); }
+          if (!moveActor(bot.rig, escorted.rig.root.position, d.speed, dt)) { bot.phase += d.speed * dt / 1000 * 3.2; swingLimbs(bot.rig, bot.phase); }
           else swingLimbs(bot.rig, 0);
         }
       } else if (bot.task === 'hunt') {
@@ -1064,7 +1087,7 @@ function updateBots(dt: number) {
       } else if (bot.task === 'guard' && bot.patrolA && bot.patrolB) {
         // сторожевой маршрут туда-сюда (как старый декоративный патрульный)
         const tgt = bot.patrolDir > 0 ? bot.patrolB : bot.patrolA;
-        if (moveActor(root, tgt, d.speed * 0.6, dt)) bot.patrolDir *= -1;
+        if (moveActor(bot.rig, tgt, d.speed * 0.6, dt)) bot.patrolDir *= -1;
         bot.phase += d.speed * 0.6 * dt / 1000 * 3.2;
         swingLimbs(bot.rig, bot.phase);
       }
@@ -1074,7 +1097,7 @@ function updateBots(dt: number) {
         const target = hostages.find((h) => h.state === 'wait');
         if (!target) { bot.task = 'idle'; bot.path = []; continue; }
         if (walkPath(bot, dt)) {
-          if (moveActor(root, target.rig.root.position, d.speed, dt)) {
+          if (moveActor(bot.rig, target.rig.root.position, d.speed, dt)) {
             target.leader = bot; target.state = 'follow';
             bot.escortee = target;
             bot.zoneIdx = hostagesSaved % rescueZones.length; // чередуем: мост / фургон
@@ -1107,7 +1130,7 @@ function updateHostages(dt: number) {
       const leadPos = h.leader === 'player' ? camera.position : h.leader ? h.leader.rig.root.position : root.position;
       const dist = Math.hypot(leadPos.x - root.position.x, leadPos.z - root.position.z);
       if (dist > 1.7) {
-        if (!moveActor(root, leadPos, 3.4, dt)) { h.phase += 3.4 * dt / 1000 * 3.2; swingLimbs(h.rig, h.phase); }
+        if (!moveActor(h.rig, leadPos, 3.4, dt)) { h.phase += 3.4 * dt / 1000 * 3.2; swingLimbs(h.rig, h.phase); }
       } else swingLimbs(h.rig, 0);
       if (h.leader === 'player' && dist > 26) { h.leader = null; h.state = 'wait'; netToast('🧍 Заложник отстал и ждёт'); }
       // дошёл до зоны эвакуации?
@@ -1117,7 +1140,7 @@ function updateHostages(dt: number) {
           hostagesSaved++;
           rescueHud();
           netToast(`✅ Заложник спасён (${hostagesSaved}/${hostagesTotal})`);
-          h.rig.root.dispose(); h.label.remove();
+          disposeHumanoid(h.rig); h.label.remove();
           if (hostagesSaved >= hostagesTotal && rescueResetTimer === null) {
             netToast('🎉 Все заложники спасены! Новая смена через 15 с…');
             rescueResetTimer = window.setTimeout(() => { rescueResetTimer = null; resetRescueRound(); }, 15000);
@@ -1145,9 +1168,9 @@ function playerTakeHostage(): boolean {
   return false;
 }
 function disposeRescue() {
-  for (const b of bots) { b.rig.root.dispose(); b.label.remove(); }
+  for (const b of bots) { disposeHumanoid(b.rig); b.label.remove(); }
   bots.length = 0;
-  for (const h of hostages) { if (h.state !== 'saved') h.rig.root.dispose(); h.label.remove(); }
+  for (const h of hostages) { if (h.state !== 'saved') disposeHumanoid(h.rig); h.label.remove(); }
   hostages.length = 0;
   for (const z of rescueZones) z.label.remove();
   rescueZones.length = 0;
@@ -1648,7 +1671,7 @@ scene.onBeforeRenderObservable.add(() => {
   const crouching = held.has('ControlLeft') || held.has('ControlRight');
   const eyeNow = crouching ? 1.05 : EYE; // присед опускает камеру
   const downRay = new B.Ray(camera.position, new B.Vector3(0, -1, 0), 60);
-  const g = scene.pickWithRay(downRay, (m) => (m.checkCollisions || (m.metadata && m.metadata.floor)) && targets.indexOf(m as B.Mesh) === -1);
+  const g = scene.pickWithRay(downRay, (m) => (m.checkCollisions || (m.metadata && m.metadata.floor)) && m.name !== 'actorCol' && targets.indexOf(m as B.Mesh) === -1);
   const floorY = (g && g.hit && g.pickedPoint) ? g.pickedPoint.y : -1e9;
 
   // --- вертикальные лестницы: подъём в зоне лестницы (W = вверх, S = вниз) ---
