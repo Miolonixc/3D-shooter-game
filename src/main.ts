@@ -1809,6 +1809,7 @@ scene.onBeforeRenderObservable.add(() => {
   // монитор видеонаблюдения: показать подсказку рядом с грузовиком; пока смотрим камеры —
   // вся остальная игровая логика (физика/стрельба/движение) на паузе
   if (monitorTriggerPos) showMonitorPrompt(!monitorActive && B.Vector3.Distance(camera.position, monitorTriggerPos) < 3.2);
+  syncCctvRender();
   updatePatroller(engine.getDeltaTime()); // ходит и пока открыт монитор — иначе замер бы в кадре камеры
   updateNet(engine.getDeltaTime());       // сеть тоже живёт при открытом мониторе (чужие игроки в кадре камер)
   // боты и заложники живут всегда (видны в CCTV); дельту считаем своими часами —
@@ -1989,7 +1990,9 @@ async function buildBspMap(): Promise<B.Vector3> {
     const rtt = new B.RenderTargetTexture(name + '_rtt', 256, scene, false);
     rtt.activeCamera = cam;
     rtt.renderList = scene.meshes; // тот же мир, что и в основном виде
-    scene.customRenderTargets.push(rtt);
+    // НЕ добавляем в customRenderTargets постоянно: 3 камеры рендерили всю сцену каждый кадр
+    // (~20 мс/кадр впустую). Активную камеру подключает рендер-цикл, только когда игрок у
+    // грузовика и смотрит на физический экран в кузове (см. syncCctvRender).
     cctvRigs.push({ cam, rtt });
     return rtt;
   }
@@ -2104,12 +2107,21 @@ let mapLoading = false;
 // поэтому чистим отдельно при смене карты (иначе на второй загрузке BSP-карты будут дублироваться).
 let cctvRigs: { cam: B.UniversalCamera; rtt: B.RenderTargetTexture }[] = [];
 function disposeCctv() {
+  scene.customRenderTargets = []; // активную камеру подключал рендер-цикл — сбрасываем
   for (const r of cctvRigs) {
-    scene.customRenderTargets.splice(scene.customRenderTargets.indexOf(r.rtt), 1);
     r.rtt.dispose();
     r.cam.dispose();
   }
   cctvRigs = [];
+}
+// перф: рендерим только ОДНУ показываемую CCTV-камеру и только когда игрок рядом с экраном
+// в кузове (иначе экран не виден). Раньше 3 камеры рендерили всю сцену каждый кадр (~20 мс).
+// В полноэкранном режиме монитора вид идёт через scene.activeCamera — RTT тоже не нужен.
+function syncCctvRender() {
+  const want = (cctvRigs.length && monitorTriggerPos && !monitorActive
+    && B.Vector3.Distance(camera.position, monitorTriggerPos) < 9) ? cctvRigs[monitorIdx].rtt : null;
+  if (want) { if (scene.customRenderTargets[0] !== want || scene.customRenderTargets.length !== 1) scene.customRenderTargets = [want]; syncMonitorScreen(); }
+  else if (scene.customRenderTargets.length) scene.customRenderTargets = [];
 }
 
 const mapToast = document.createElement('div');
