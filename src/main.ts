@@ -1025,7 +1025,7 @@ function tracer(from: B.Vector3, to: B.Vector3) {
   line.lookAt(to);
   setTimeout(() => line.dispose(), 55);
 }
-function botShoot(bot: Bot, targetPos: B.Vector3, victim: 'player' | Bot) {
+function botShoot(bot: Bot, targetPos: B.Vector3, victim: BotVictim) {
   const d = DIFFS[diffIdx];
   bot.cooldown = performance.now() + d.interval * (0.8 + Math.random() * 0.4);
   if (bot.rig.flash) {
@@ -1044,11 +1044,14 @@ function botShoot(bot: Bot, targetPos: B.Vector3, victim: 'player' | Bot) {
   const hitChance = d.acc * Math.max(0.25, 1 - dist / d.vision);
   if (Math.random() < hitChance) {
     if (victim === 'player') damagePlayer(d.dmg);
-    else damageBot(victim, d.dmg, false);
+    else if ('guest' in victim) { // кооп: урон гостю применяет сервер (авторитарно по hp)
+      if (net && net.readyState === WebSocket.OPEN) net.send(JSON.stringify({ t: 'botdmg', target: victim.guest, dmg: d.dmg }));
+    } else damageBot(victim, d.dmg, false);
   }
 }
-// видимый враг для бота: у Т это игрок и КТ-боты, у КТ — только Т-боты. FOV ~100° при первом обнаружении
-function findEnemy(bot: Bot): { pos: B.Vector3; victim: 'player' | Bot } | null {
+// видимый враг для бота: у Т это игрок (свой + гости) и КТ-боты, у КТ — только Т-боты.
+type BotVictim = 'player' | Bot | { guest: string };
+function findEnemy(bot: Bot): { pos: B.Vector3; victim: BotVictim } | null {
   const d = DIFFS[diffIdx];
   const eye = bot.rig.root.position.add(new B.Vector3(0, 1.6, 0));
   const fwd = new B.Vector3(Math.sin(bot.rig.root.rotation.y), 0, Math.cos(bot.rig.root.rotation.y));
@@ -1065,7 +1068,15 @@ function findEnemy(bot: Bot): { pos: B.Vector3; victim: 'player' | Bot } | null 
     }
     return canSee(eye, p);
   }
-  if (bot.team === 'T' && alive && visible(camera.position)) return { pos: camera.position.clone(), victim: 'player' };
+  if (bot.team === 'T') {
+    if (alive && visible(camera.position)) return { pos: camera.position.clone(), victim: 'player' };
+    // кооп: террорист хоста видит и гостей (удалённых игроков) — цель для стрельбы
+    for (const [rid, r] of remotes) {
+      if (!r.alive) continue;
+      const p = r.rig.root.position.add(new B.Vector3(0, 1.35, 0));
+      if (visible(p)) return { pos: p, victim: { guest: rid } };
+    }
+  }
   for (const other of bots) {
     if (other.team === bot.team || !other.alive) continue;
     const p = other.rig.root.position.add(new B.Vector3(0, 1.3, 0));

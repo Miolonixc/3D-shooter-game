@@ -45,6 +45,26 @@ function scoreList() {
   return [...players.entries()].map(([id, p]) => [id, p.name, p.kills, p.deaths]);
 }
 function broadcastScore() { broadcast({ t: 'score', list: scoreList() }); }
+// применить урон к игроку (общее для PvP-shoot и bot-damage в коопе); byId — кто нанёс (или null=бот)
+function applyDamage(targetId, target, dmg, byId, shooter) {
+  target.hp = Math.max(0, target.hp - dmg);
+  if (target.hp <= 0) {
+    target.alive = false;
+    target.deaths++;
+    if (shooter) shooter.kills++;
+    broadcast({ t: 'kill', id: targetId, by: byId || null });
+    broadcastScore();
+    console.log(`x ${shooter ? shooter.name : 'бот'} убил ${target.name}`);
+    setTimeout(() => {
+      const p = players.get(targetId);
+      if (!p) return;
+      p.hp = MAX_HP; p.alive = true;
+      broadcast({ t: 'respawn', id: targetId });
+    }, RESPAWN_MS);
+  } else {
+    broadcast({ t: 'dmg', id: targetId, hp: target.hp, by: byId || null });
+  }
+}
 // вырезаем управляющие символы (перевод строки и т.п. ломает и консольные логи, и однострочный UI чата)
 function clean(s, max) { return String(s).replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, max); }
 
@@ -95,6 +115,12 @@ ws.attach(server, '/ws', (conn) => {
     if ((m.t === 'botshoot' || m.t === 'takehostage') && id && id !== pveHostId) {
       const h = players.get(pveHostId); if (h) sendTo(h.conn, { ...m, who: id }); return;
     }
+    // кооп: бот хоста ранил гостя — только хост, применяем к hp цели авторитарно
+    if (m.t === 'botdmg' && id === pveHostId) {
+      const target = typeof m.target === 'string' ? players.get(m.target) : null;
+      if (target && target.alive && Number.isFinite(m.dmg)) applyDamage(m.target, target, Math.min(100, m.dmg), null, null);
+      return;
+    }
 
     if (m.t === 'state' && id) {
       const p = players.get(id);
@@ -117,25 +143,7 @@ ws.attach(server, '/ws', (conn) => {
       if (nowShot - shooter.lastShotAt < SHOOT_MIN_INTERVAL_MS) return;
       shooter.lastShotAt = nowShot;
       const table = WEAPON[m.weapon] || WEAPON['Пистолет'];
-      const dmg = m.head ? table.head : table.body;
-      target.hp = Math.max(0, target.hp - dmg);
-      if (target.hp <= 0) {
-        target.alive = false;
-        shooter.kills++; target.deaths++;
-        broadcast({ t: 'kill', id: m.target, by: id });
-        broadcastScore();
-        console.log(`x ${shooter.name} убил ${target.name} (${m.head ? 'headshot' : 'body'})`);
-        const targetId = m.target;
-        setTimeout(() => {
-          const p = players.get(targetId);
-          if (!p) return; // уже отключился
-          p.hp = MAX_HP; p.alive = true;
-          broadcast({ t: 'respawn', id: targetId });
-        }, RESPAWN_MS);
-      } else {
-        broadcast({ t: 'dmg', id: m.target, hp: target.hp, by: id });
-        console.log(`  ${shooter.name} -> ${target.name}: ${dmg} dmg (hp ${target.hp})`);
-      }
+      applyDamage(m.target, target, m.head ? table.head : table.body, id, shooter);
       return;
     }
 

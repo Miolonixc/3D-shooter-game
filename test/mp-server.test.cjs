@@ -111,6 +111,26 @@ test('кооп: pve от хоста раздаётся гостям, от не-�
   } finally { a.sock.destroy(); b.sock.destroy(); }
 });
 
+test('кооп: botdmg от хоста ранит гостя (авторитарно), от не-хоста игнорируется', async () => {
+  const a = connect(), b = connect();
+  await sleep(100);
+  a.send({ t: 'join', name: 'Host' });
+  b.send({ t: 'join', name: 'Guest' });
+  await sleep(150);
+  const guestId = last(b, 'welcome').id;
+  try {
+    a.send({ t: 'botdmg', target: guestId, dmg: 40 }); // хост: бот ранил гостя
+    await sleep(120);
+    const dmg = parsed(b).reverse().find((m) => m.t === 'dmg');
+    assert.ok(dmg && dmg.hp === 60, 'гость получил урон от бота (hp 100-40=60), by=null (бот)');
+    assert.equal(dmg.by, null, 'источник урона — бот (by null)');
+    b.send({ t: 'botdmg', target: guestId, dmg: 40 }); // не-хост шлёт botdmg — сервер должен игнорировать
+    await sleep(120);
+    const dmgs = parsed(b).filter((m) => m.t === 'dmg');
+    assert.equal(dmgs.length, 1, 'botdmg от не-хоста проигнорирован');
+  } finally { a.sock.destroy(); b.sock.destroy(); }
+});
+
 test('state доходит до снапшота при 2+ игроках', async () => {
   const a = connect(), b = connect();
   await sleep(100);
