@@ -30,6 +30,11 @@ const SHOOT_MIN_INTERVAL_MS = 55;
 
 /** @type {Map<string, {conn: any, name: string, x:number,y:number,z:number,yaw:number,crouch:boolean,hp:number,alive:boolean,kills:number,deaths:number}>} */
 const players = new Map();
+// кооп-режим заложников: один игрок — «хост» PvE (крутит ИИ ботов локально и вещает мир
+// снапшотами 't:pve'), остальные — гости (рендерят). Первый подключившийся становится хостом;
+// при его уходе хостом становится следующий по порядку. См. host-authoritative в клиенте.
+let pveHostId = null;
+function pickHost() { pveHostId = players.size ? players.keys().next().value : null; }
 
 function sendTo(conn, obj) { conn.send(JSON.stringify(obj)); }
 function broadcast(obj, exceptId) {
@@ -70,17 +75,23 @@ ws.attach(server, '/ws', (conn) => {
       id = crypto.randomBytes(4).toString('hex');
       const name = clean(m.name, NAME_MAX) || 'player';
       players.set(id, { conn, name, x: 0, y: 0, z: 0, yaw: 0, crouch: false, hp: MAX_HP, alive: true, kills: 0, deaths: 0, lastShotAt: 0 });
-      // новичку — его id и список остальных; остальным — уведомление
+      if (!pveHostId) pickHost(); // первый игрок — хост PvE
+      // новичку — его id, список остальных и текущий хост; остальным — уведомление
       sendTo(conn, {
-        t: 'welcome', id,
+        t: 'welcome', id, host: pveHostId,
         players: [...players.entries()].filter(([pid]) => pid !== id)
           .map(([pid, p]) => ({ id: pid, name: p.name, x: p.x, y: p.y, z: p.z, yaw: p.yaw, hp: p.hp, alive: p.alive })),
       });
       broadcast({ t: 'joined', id, name }, id);
       broadcastScore();
-      console.log(`+ ${name} (${id}) — игроков: ${players.size}`);
+      console.log(`+ ${name} (${id}) — игроков: ${players.size}, хост: ${pveHostId}`);
       return;
     }
+
+    // кооп: хост вещает мир (боты+заложники) — просто раздаём остальным. Только от хоста.
+    if (m.t === 'pve' && id === pveHostId) { broadcast(m, id); return; }
+    // кооп: гость выстрелил в бота — маршрутизируем хосту (у него авторитарные боты)
+    if (m.t === 'botshoot' && id && id !== pveHostId) { const h = players.get(pveHostId); if (h) sendTo(h.conn, m); return; }
 
     if (m.t === 'state' && id) {
       const p = players.get(id);
@@ -141,9 +152,11 @@ ws.attach(server, '/ws', (conn) => {
   conn.onClose = () => {
     if (id && players.has(id)) {
       const name = players.get(id).name;
+      const wasHost = id === pveHostId;
       players.delete(id);
       broadcast({ t: 'left', id });
       broadcastScore();
+      if (wasHost) { pickHost(); broadcast({ t: 'host', id: pveHostId }); console.log(`  хост ушёл → новый хост: ${pveHostId}`); }
       console.log(`- ${name} (${id}) — игроков: ${players.size}`);
     }
   };

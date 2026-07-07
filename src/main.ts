@@ -90,6 +90,11 @@ let netWantConnected = false; // хочет ли игрок быть онлай�
 let netReconnectAttempt = 0;
 let netReconnectTimer: number | null = null;
 const remotes = new Map<string, RemotePlayer>();
+// кооп-режим заложников (host-authoritative): один клиент — хост, крутит ИИ ботов и вещает мир;
+// гости выключают локальный ИИ и рендерят присланных ботов/заложников по снапшотам 't:pve'.
+let pveHostId = '';       // id хоста PvE (от сервера)
+let pveGuest = false;     // мы — гость (кто-то другой хост): не симулируем, а принимаем мир
+let pveLastSend = 0;
 function netToast(msg: string) { showMapName(msg); } // переиспользуем тост смены карты
 function myName(): string {
   // персональное имя без экрана ввода: генерим один раз и держим в localStorage —
@@ -129,6 +134,7 @@ function netDisconnect() {
   scoreboard = [];
   if (scoreboardVisible) renderScoreboard();
   if (chatOpen) closeChat();
+  pveHostId = ''; updatePveRole(); // офлайн → вернуть локальный PvE (если были гостем)
 }
 function netUrl() {
   // сервер один на всех (VPS), а не у каждого свой локальный — поэтому дефолт фиксированный,
@@ -152,7 +158,12 @@ function netOpen() {
       netId = m.id;
       hp = 100; alive = true; hideDeathOverlay(); hud(); // сервер всегда создаёт нового игрока с полным hp
       for (const p of m.players) { addRemote(p.id, p.name, p.x, p.y, p.z, p.yaw); if (p.alive === false) setRemoteAlive(p.id, false); }
+      pveHostId = m.host || ''; updatePveRole();
       netToast(`🌐 В игре (игроков: ${m.players.length + 1})`);
+    } else if (m.t === 'host') {
+      pveHostId = m.id || ''; updatePveRole();
+    } else if (m.t === 'pve') {
+      if (pveGuest) applyPveSnapshot(m);
     } else if (m.t === 'joined') {
       addRemote(m.id, m.name);
       netToast('🌐 Подключился: ' + m.name);
@@ -184,6 +195,15 @@ function netOpen() {
       if (scoreboardVisible) renderScoreboard();
     } else if (m.t === 'chat') {
       addChatLine(m.name, m.text);
+    } else if (m.t === 'botshoot') {
+      // кооп-хост: гость выстрелил в бота — применяем урон авторитарно
+      if (pveHostId === netId && !pveGuest) {
+        const bot = bots.find((b) => b.id === m.target);
+        if (bot && bot.alive && bot.team === 'T' && Number.isFinite(m.dmg)) {
+          damageBot(bot, Math.min(200, m.dmg), false);
+          bot.lastSeen = performance.now(); bot.aimMs = DIFFS[diffIdx].react * 0.6;
+        }
+      }
     }
   };
   // тоннель (Cloudflare quick tunnel) периодически рвёт соединение сам по себе (QUIC keepalive) —
@@ -872,16 +892,18 @@ interface Bot {
   phase: number;                // фаза анимации ходьбы
   stuckMs: number; prevDist: number; // анти-стак: не приближается к вэйпоинту → пропустить его
   label: HTMLDivElement;
+  net?: { x: number; y: number; z: number; yaw: number }; // цель интерполяции у гостя (host-authoritative)
 }
 interface Hostage {
   rig: Humanoid; state: 'wait' | 'follow' | 'saved';
   leader: 'player' | Bot | null;
   phase: number; label: HTMLDivElement;
+  net?: { x: number; y: number; z: number; yaw: number }; // цель интерполяции у гостя
 }
 const bots: Bot[] = [];
 const hostages: Hostage[] = [];
 let lastRescueTick = performance.now();
-interface RescueZone { pos: B.Vector3; node: number; label: HTMLDivElement; }
+interface RescueZone { pos: B.Vector3; node: number; label: HTMLDivElement; disc: B.Mesh; }
 const rescueZones: RescueZone[] = [];
 let botSeq = 1;
 let hostagesTotal = 0, hostagesSaved = 0;
@@ -925,11 +947,12 @@ function projectActorLabel(el: HTMLDivElement, headPos: B.Vector3, show: boolean
   el.style.display = 'block';
 }
 
-function addBot(team: Team, pos: B.Vector3, patrol?: [B.Vector3, B.Vector3]) {
-  const rig = buildHumanoid('bot_' + team + '_' + botSeq, team === 'T' ? 'terror' : 'ct');
+function addBot(team: Team, pos: B.Vector3, patrol?: [B.Vector3, B.Vector3], explicitId?: number) {
+  // explicitId — для ботов, создаваемых у гостя по id хоста (совпадение id между клиентами)
+  const id = explicitId !== undefined ? explicitId : botSeq++;
+  const rig = buildHumanoid('bot_' + team + '_' + id, team === 'T' ? 'terror' : 'ct');
   rig.root.position.copyFrom(pos);
   attachCollider(rig);
-  const id = botSeq++;
   for (const m of rig.root.getChildMeshes(false)) m.metadata = { botId: id };
   const bot: Bot = {
     id, team, rig, hp: 100, alive: true, path: [],
@@ -1168,10 +1191,82 @@ function updateHostages(dt: number) {
     }
   }
   hostagePrompt.style.opacity = nearWaiting ? '1' : '0';
-  // подписи над головами
+  projectRescueLabels();
+}
+// проекция подписей над головами (общая для хоста/офлайна и гостя)
+function projectRescueLabels() {
   for (const bot of bots) projectActorLabel(bot.label, bot.rig.root.position.add(new B.Vector3(0, 2.05, 0)), bot.alive);
   for (const h of hostages) if (h.state !== 'saved') projectActorLabel(h.label, h.rig.root.position.add(new B.Vector3(0, 2.05, 0)), true);
   for (const z of rescueZones) projectActorLabel(z.label, z.pos.add(new B.Vector3(0, 1.6, 0)), true, false);
+}
+
+// ===== кооп: синхронизация мира заложников (host-authoritative) =====
+// Хост шлёт компактный снапшот; гость применяет: создаёт/удаляет/интерполирует ботов и заложников.
+const HOST_HZ = 15;
+function sendPveSnapshot() {
+  if (!net || net.readyState !== WebSocket.OPEN) return;
+  const b = bots.map((x) => [x.id, x.team === 'T' ? 0 : 1, +x.rig.root.position.x.toFixed(2), +x.rig.root.position.y.toFixed(2), +x.rig.root.position.z.toFixed(2), +x.rig.root.rotation.y.toFixed(2), Math.max(0, x.hp | 0), x.alive ? 1 : 0]);
+  const h = hostages.map((x, i) => [i, +x.rig.root.position.x.toFixed(2), +x.rig.root.position.y.toFixed(2), +x.rig.root.position.z.toFixed(2), +x.rig.root.rotation.y.toFixed(2), x.state === 'wait' ? 0 : x.state === 'follow' ? 1 : 2]);
+  net.send(JSON.stringify({ t: 'pve', b, h, saved: hostagesSaved, total: hostagesTotal }));
+}
+function applyPveSnapshot(m: any) {
+  // --- боты ---
+  const seen = new Set<number>();
+  for (const row of m.b) {
+    const [id, tc, x, y, z, yaw, bhp, al] = row;
+    seen.add(id);
+    let bot = bots.find((b) => b.id === id);
+    if (!bot) bot = addBot(tc === 0 ? 'T' : 'CT', new B.Vector3(x, y, z), undefined, id);
+    bot.hp = bhp;
+    bot.net = { x, y, z, yaw };
+    if (al && !bot.alive) { bot.alive = true; bot.rig.root.setEnabled(true); bot.rig.root.rotation.x = 0; }
+    if (!al && bot.alive) { bot.alive = false; bot.rig.root.rotation.x = -Math.PI / 2; bot.rig.root.position.y += 0.25; bot.label.style.display = 'none'; }
+  }
+  for (const b of bots.slice()) if (!seen.has(b.id)) { disposeHumanoid(b.rig); b.label.remove(); bots.splice(bots.indexOf(b), 1); }
+  // --- заложники --- (индекс = порядковый; создаём недостающих)
+  for (const row of m.h) {
+    const [i, x, y, z, yaw, st] = row;
+    let hos = hostages[i];
+    if (!hos && st !== 2) hos = addHostage(new B.Vector3(x, y, z));
+    if (!hos) continue;
+    hos.net = { x, y, z, yaw };
+    const newState = st === 0 ? 'wait' : st === 1 ? 'follow' : 'saved';
+    if (newState === 'saved' && hos.state !== 'saved') { disposeHumanoid(hos.rig); hos.label.style.display = 'none'; }
+    hos.state = newState;
+  }
+  hostagesSaved = m.saved; hostagesTotal = m.total; rescueHud();
+}
+// гость: интерполяция присланных сущностей к целям + анимация шага (без ИИ)
+function interpolatePve(dt: number) {
+  const k = Math.min(1, dt / 60);
+  for (const b of bots) {
+    if (!b.alive || !b.net) continue;
+    const root = b.rig.root;
+    const before = root.position.clone();
+    B.Vector3.LerpToRef(root.position, new B.Vector3(b.net.x, b.net.y, b.net.z), k, root.position);
+    let dy = b.net.yaw - root.rotation.y; while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
+    root.rotation.y += dy * k;
+    const sp = Math.hypot(root.position.x - before.x, root.position.z - before.z);
+    if (sp > 0.003) { b.phase += sp * 3.5; swingLimbs(b.rig, b.phase); } else swingLimbs(b.rig, 0);
+  }
+  for (const h of hostages) {
+    if (h.state === 'saved' || !h.net) continue;
+    const root = h.rig.root;
+    const before = root.position.clone();
+    B.Vector3.LerpToRef(root.position, new B.Vector3(h.net.x, h.net.y, h.net.z), k, root.position);
+    let dy = h.net.yaw - root.rotation.y; while (dy > Math.PI) dy -= 2 * Math.PI; while (dy < -Math.PI) dy += 2 * Math.PI;
+    root.rotation.y += dy * k;
+    const sp = Math.hypot(root.position.x - before.x, root.position.z - before.z);
+    if (sp > 0.003) { h.phase += sp * 3.5; swingLimbs(h.rig, h.phase); } else swingLimbs(h.rig, 0);
+  }
+  projectRescueLabels();
+}
+// смена роли host↔guest при изменении хоста/подключения
+function updatePveRole() {
+  const wasGuest = pveGuest;
+  pveGuest = !!net && net.readyState === WebSocket.OPEN && !!pveHostId && pveHostId !== netId && curMap === 0;
+  if (pveGuest && !wasGuest) { disposeRescue(); if (curMap === 0) setupRescueZones(); netToast('🤝 Кооп: мир ведёт хост'); } // гость — сносим локальный ИИ, но зоны свои
+  else if (!pveGuest && wasGuest) { disposeRescue(); if (curMap === 0) setupRescue(); }          // стал хостом/офлайн — свой ИИ
 }
 function playerTakeHostage(): boolean {
   if (!alive) return false;
@@ -1189,7 +1284,7 @@ function disposeRescue() {
   bots.length = 0;
   for (const h of hostages) { if (h.state !== 'saved') disposeHumanoid(h.rig); h.label.remove(); }
   hostages.length = 0;
-  for (const z of rescueZones) z.label.remove();
+  for (const z of rescueZones) { z.label.remove(); if (!z.disc.isDisposed()) z.disc.dispose(); }
   rescueZones.length = 0;
   hostagesTotal = 0; hostagesSaved = 0;
   if (rescueResetTimer !== null) { clearTimeout(rescueResetTimer); rescueResetTimer = null; }
@@ -1201,14 +1296,8 @@ function resetRescueRound() {
   setupRescue();
   netToast('🔄 Новая смена заложников');
 }
-function setupRescue() {
-  // заложники в комнате второго этажа
-  addHostage(new B.Vector3(-9.5, 3.84, 78));
-  addHostage(new B.Vector3(-6.5, 3.84, 74));
-  // охрана: один на антресоли у комнаты, один в коридоре (маршрут старого патрульного)
-  addBot('T', new B.Vector3(-10, 3.84, 72), [new B.Vector3(-11, 3.84, 72), new B.Vector3(-4, 3.84, 79)]);
-  addBot('T', new B.Vector3(8, 0.96, 60), [new B.Vector3(8, 0.96, 56), new B.Vector3(8, 0.96, 79)]);
-  // зоны эвакуации: ворота у моста (конец коридора) и фургон у спавна
+// зоны эвакуации статичны и одинаковы на всех клиентах — создаём и у хоста, и у гостя
+function setupRescueZones() {
   const zoneMat = new B.StandardMaterial('zoneMat', scene);
   zoneMat.emissiveColor = new B.Color3(0.15, 0.75, 0.3);
   zoneMat.diffuseColor = new B.Color3(0, 0, 0);
@@ -1220,10 +1309,19 @@ function setupRescue() {
     disc.position.set(pos.x, pos.y + 0.08, pos.z);
     disc.isPickable = false; disc.checkCollisions = false;
     reg(disc);
-    rescueZones.push({ pos, node, label: makeActorLabel('⛑ ' + name, '#7dffa0') });
+    rescueZones.push({ pos, node, label: makeActorLabel('⛑ ' + name, '#7dffa0'), disc });
   };
   mkZone(new B.Vector3(10, 0.96, 79), 4, 'Эвакуация: мост');
   mkZone(new B.Vector3(18, 0, 9), 12, 'Эвакуация: фургон');
+}
+function setupRescue() {
+  // заложники в комнате второго этажа
+  addHostage(new B.Vector3(-9.5, 3.84, 78));
+  addHostage(new B.Vector3(-6.5, 3.84, 74));
+  // охрана: один на антресоли у комнаты, один в коридоре (маршрут старого патрульного)
+  addBot('T', new B.Vector3(-10, 3.84, 72), [new B.Vector3(-11, 3.84, 72), new B.Vector3(-4, 3.84, 79)]);
+  addBot('T', new B.Vector3(8, 0.96, 60), [new B.Vector3(8, 0.96, 56), new B.Vector3(8, 0.96, 79)]);
+  setupRescueZones();
   rescueHud();
 }
 
@@ -1448,9 +1546,14 @@ function fire() {
         hitMarker(headshot);
         dmgPopup(hit.pickedPoint, dmg, headshot);
         sndHit();
-        damageBot(bot, dmg, true);
-        // получив пулю, охранник сразу «в бою» — развернётся на игрока в updateBots
-        bot.lastSeen = performance.now(); bot.aimMs = DIFFS[diffIdx].react * 0.6; // получил пулю — уже почти прицелился, ответит быстрее
+        if (pveGuest) {
+          // кооп-гость: урон по боту считает ХОСТ (у него авторитарный бот) — шлём заявку
+          if (net && net.readyState === WebSocket.OPEN) net.send(JSON.stringify({ t: 'botshoot', target: bot.id, dmg, head: headshot }));
+        } else {
+          damageBot(bot, dmg, true);
+          // получив пулю, охранник сразу «в бою» — развернётся на игрока в updateBots
+          bot.lastSeen = performance.now(); bot.aimMs = DIFFS[diffIdx].react * 0.6; // получил пулю — уже почти прицелился, ответит быстрее
+        }
       }
       return;
     }
@@ -1680,8 +1783,15 @@ scene.onBeforeRenderObservable.add(() => {
   const rescueNow = performance.now();
   const rescueDt = Math.min(rescueNow - lastRescueTick, 50);
   lastRescueTick = rescueNow;
-  updateBots(rescueDt);
-  updateHostages(rescueDt);
+  if (pveGuest) {
+    interpolatePve(rescueDt);              // гость: только рендер присланного мира, без ИИ
+  } else {
+    updateBots(rescueDt);                  // хост/офлайн: локальный ИИ
+    updateHostages(rescueDt);
+    if (net && net.readyState === WebSocket.OPEN && pveHostId === netId && remotes.size > 0 && rescueNow - pveLastSend > 1000 / HOST_HZ) {
+      pveLastSend = rescueNow; sendPveSnapshot(); // хост вещает мир, если есть гости
+    }
+  }
   if (monitorActive) return;
   if (!alive) return; // мёртв — камера/физика на паузе до респавна (сервер пришлёт 'respawn')
   if (chatOpen) return; // печатает в чат — камера/движение на паузе, чтобы не улетел, пока набирает текст

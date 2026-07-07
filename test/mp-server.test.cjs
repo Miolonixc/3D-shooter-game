@@ -70,6 +70,47 @@ test('join -> welcome с собственным id; joined уходит оста
   } finally { a.sock.destroy(); b.sock.destroy(); }
 });
 
+test('кооп: первый игрок — хост; второй получает его id как host; хост уходит → миграция', async () => {
+  const a = connect(); await sleep(100);
+  a.send({ t: 'join', name: 'Host' });
+  await sleep(150);
+  const b = connect(); await sleep(100);
+  b.send({ t: 'join', name: 'Guest' });
+  await sleep(150);
+  try {
+    const wa = last(a, 'welcome'), wb = last(b, 'welcome');
+    assert.ok(wa.host === wa.id, 'первый игрок — хост (host === свой id)');
+    assert.equal(wb.host, wa.id, 'второй получил id первого как host');
+    a.sock.destroy(); // хост уходит
+    await sleep(200);
+    const hostMsg = parsed(b).reverse().find((m) => m.t === 'host');
+    assert.ok(hostMsg && hostMsg.id === wb.id, 'после ухода хоста гость назначен новым хостом');
+  } finally { a.sock.destroy(); b.sock.destroy(); }
+});
+
+test('кооп: pve от хоста раздаётся гостям, от не-хоста — игнорируется; botshoot гостя идёт хосту', async () => {
+  const a = connect(), b = connect();
+  await sleep(100);
+  a.send({ t: 'join', name: 'Host' });
+  b.send({ t: 'join', name: 'Guest' });
+  await sleep(150);
+  try {
+    a.send({ t: 'pve', b: [[1, 0, 8, 1, 60, 0, 100, 1]], h: [], saved: 0, total: 2 });
+    b.send({ t: 'pve', b: [[9, 0, 0, 0, 0, 0, 1, 1]], h: [], saved: 5, total: 5 }); // гость слать не должен — сервер отбросит
+    await sleep(120);
+    const pveAtGuest = parsed(b).filter((m) => m.t === 'pve');
+    assert.ok(pveAtGuest.length >= 1, 'гость получил pve от хоста');
+    assert.equal(pveAtGuest[pveAtGuest.length - 1].total, 2, 'это снапшот хоста, а не подделка гостя');
+    const pveAtHost = parsed(a).filter((m) => m.t === 'pve');
+    assert.equal(pveAtHost.length, 0, 'хосту не прилетает собственный pve, и pve от гостя не раздаётся');
+    // botshoot от гостя должен прийти хосту
+    b.send({ t: 'botshoot', target: 1, dmg: 50, head: false });
+    await sleep(120);
+    const bs = parsed(a).reverse().find((m) => m.t === 'botshoot');
+    assert.ok(bs && bs.target === 1, 'хост получил botshoot гостя');
+  } finally { a.sock.destroy(); b.sock.destroy(); }
+});
+
 test('state доходит до снапшота при 2+ игроках', async () => {
   const a = connect(), b = connect();
   await sleep(100);
