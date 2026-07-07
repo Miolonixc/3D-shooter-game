@@ -910,7 +910,7 @@ interface Hostage {
   rig: Humanoid; state: 'wait' | 'follow' | 'saved';
   leader: 'player' | Bot | null;
   leaderGuestId?: string;         // кооп: ведёт удалённый игрок (гость) с этим netId — у хоста
-  phase: number; label: HTMLDivElement;
+  phase: number; label: HTMLDivElement; menaceMs?: number; // накопленная «угроза» от охраны при выводе
   net?: { x: number; y: number; z: number; yaw: number }; // цель интерполяции у гостя
 }
 const bots: Bot[] = [];
@@ -919,7 +919,8 @@ let lastRescueTick = performance.now();
 interface RescueZone { pos: B.Vector3; node: number; label: HTMLDivElement; disc: B.Mesh; }
 const rescueZones: RescueZone[] = [];
 let botSeq = 1;
-let hostagesTotal = 0, hostagesSaved = 0;
+let hostagesTotal = 0, hostagesSaved = 0, hostagesLost = 0;
+let rescueRound = 1;
 let rescueResetTimer: number | null = null;
 
 const rescueEl = document.createElement('div');
@@ -928,7 +929,39 @@ Object.assign(rescueEl.style, { top: '62px', left: '16px', font: '600 15px syste
 document.body.appendChild(rescueEl);
 function rescueHud() {
   rescueEl.style.display = hostagesTotal > 0 ? 'block' : 'none';
-  rescueEl.textContent = `🧍 Заложники: спасено ${hostagesSaved} / ${hostagesTotal}`;
+  const lost = hostagesLost > 0 ? `  ·  💀 ${hostagesLost}` : '';
+  rescueEl.textContent = `🚩 Раунд ${rescueRound}   🧍 спасено ${hostagesSaved}/${hostagesTotal}${lost}`;
+}
+// оверлей итогов раунда
+const roundEl = document.createElement('div');
+roundEl.style.cssText = 'position:fixed;left:50%;top:34%;transform:translate(-50%,-50%);z-index:16;text-align:center;'
+  + 'padding:18px 34px;border-radius:12px;font:700 26px system-ui;color:#fff;pointer-events:none;display:none;'
+  + 'background:rgba(0,0,0,.62);backdrop-filter:blur(2px);';
+document.body.appendChild(roundEl);
+function showRoundResult(win: boolean) {
+  roundEl.style.display = 'block';
+  roundEl.style.color = win ? '#7dffa0' : '#ff7a6a';
+  roundEl.innerHTML = (win ? '🎉 Раунд пройден!' : '💀 Раунд провален')
+    + `<div style="font:600 16px system-ui;opacity:.85;margin-top:8px;color:#fff">Спасено ${hostagesSaved} из ${hostagesTotal}` + (hostagesLost ? ` · погибло ${hostagesLost}` : '') + '<br>Новая смена через 8 с…</div>';
+}
+function hideRoundResult() { roundEl.style.display = 'none'; }
+// раунд окончен, когда все заложники учтены (спасены или погибли). Только хост/офлайн решает.
+function checkRoundOver() {
+  if (hostagesTotal > 0 && hostagesSaved + hostagesLost >= hostagesTotal && rescueResetTimer === null) {
+    showRoundResult(hostagesLost === 0);
+    rescueResetTimer = window.setTimeout(() => { rescueResetTimer = null; hideRoundResult(); rescueRound++; resetRescueRound(); }, 8000);
+  }
+}
+// заложник погиб (казнён охраной при выводе). dispose + счётчик + проверка конца раунда.
+function killHostage(h: Hostage) {
+  if (h.state === 'saved') return;
+  h.state = 'saved'; // «учтён» (снят с карты); отдельный счётчик потерь — hostagesLost
+  hostagesLost++;
+  disposeHumanoid(h.rig); h.label.remove();
+  rescueHud();
+  netToast(`💀 Заложник убит (${hostagesSaved}/${hostagesTotal}, потерь ${hostagesLost})`);
+  sndKill();
+  checkRoundOver();
 }
 const hostagePrompt = document.createElement('div');
 hostagePrompt.textContent = 'E — забрать заложника';
@@ -1200,6 +1233,19 @@ function updateHostages(dt: number) {
         if (!moveActor(h.rig, leadPos, 3.4, dt)) { h.phase += 3.4 * dt / 1000 * 3.2; swingLimbs(h.rig, h.phase); }
       } else swingLimbs(h.rig, 0);
       if ((h.leader === 'player' || guest) && dist > 26) { h.leader = null; h.leaderGuestId = undefined; h.state = 'wait'; netToast('🧍 Заложник отстал и ждёт'); }
+      // казнь: если охранник рядом видит выводимого заложника (и не занят стрельбой по игроку) —
+      // копит угрозу; передержал под прицелом → заложник убит. Создаёт срочность: убери охрану.
+      const hp = root.position.add(new B.Vector3(0, 1.4, 0));
+      let menaced = false;
+      for (const bt of bots) {
+        if (bt.team !== 'T' || !bt.alive) continue;
+        if (performance.now() - bt.lastSeen < 1200) continue; // бот стреляет по игроку — не до заложника
+        const be = bt.rig.root.position.add(new B.Vector3(0, 1.6, 0));
+        if (B.Vector3.Distance(be, hp) < 15 && canSee(be, hp)) { menaced = true; break; }
+      }
+      const menaceCap = 3600 - diffIdx * 800; // лёгкий 3.6с, средний 2.8с, тяжёлый 2.0с
+      h.menaceMs = menaced ? (h.menaceMs || 0) + dt : Math.max(0, (h.menaceMs || 0) - dt * 1.5);
+      if ((h.menaceMs || 0) >= menaceCap) { killHostage(h); continue; }
       // дошёл до зоны эвакуации?
       for (const z of rescueZones) {
         if (B.Vector3.Distance(root.position, z.pos) < 2.6) {
@@ -1208,10 +1254,7 @@ function updateHostages(dt: number) {
           rescueHud();
           netToast(`✅ Заложник спасён (${hostagesSaved}/${hostagesTotal})`);
           disposeHumanoid(h.rig); h.label.remove();
-          if (hostagesSaved >= hostagesTotal && rescueResetTimer === null) {
-            netToast('🎉 Все заложники спасены! Новая смена через 15 с…');
-            rescueResetTimer = window.setTimeout(() => { rescueResetTimer = null; resetRescueRound(); }, 15000);
-          }
+          checkRoundOver();
           break;
         }
       }
@@ -1234,7 +1277,7 @@ function sendPveSnapshot() {
   if (!net || net.readyState !== WebSocket.OPEN) return;
   const b = bots.map((x) => [x.id, x.team === 'T' ? 0 : 1, +x.rig.root.position.x.toFixed(2), +x.rig.root.position.y.toFixed(2), +x.rig.root.position.z.toFixed(2), +x.rig.root.rotation.y.toFixed(2), Math.max(0, x.hp | 0), x.alive ? 1 : 0]);
   const h = hostages.map((x, i) => [i, +x.rig.root.position.x.toFixed(2), +x.rig.root.position.y.toFixed(2), +x.rig.root.position.z.toFixed(2), +x.rig.root.rotation.y.toFixed(2), x.state === 'wait' ? 0 : x.state === 'follow' ? 1 : 2]);
-  net.send(JSON.stringify({ t: 'pve', b, h, saved: hostagesSaved, total: hostagesTotal }));
+  net.send(JSON.stringify({ t: 'pve', b, h, saved: hostagesSaved, total: hostagesTotal, lost: hostagesLost, round: rescueRound }));
 }
 function applyPveSnapshot(m: any) {
   // --- боты ---
@@ -1261,7 +1304,11 @@ function applyPveSnapshot(m: any) {
     if (newState === 'saved' && hos.state !== 'saved') { disposeHumanoid(hos.rig); hos.label.style.display = 'none'; }
     hos.state = newState;
   }
-  hostagesSaved = m.saved; hostagesTotal = m.total; rescueHud();
+  const prevRound = rescueRound;
+  hostagesSaved = m.saved; hostagesTotal = m.total; hostagesLost = m.lost || 0; rescueRound = m.round || 1; rescueHud();
+  // гость показывает оверлей итогов, повторяя состояние хоста
+  if (rescueRound !== prevRound) hideRoundResult();
+  else if (hostagesTotal > 0 && hostagesSaved + hostagesLost >= hostagesTotal) showRoundResult(hostagesLost === 0);
 }
 // гость: интерполяция присланных сущностей к целям + анимация шага (без ИИ)
 function interpolatePve(dt: number) {
@@ -1316,15 +1363,19 @@ function disposeRescue() {
   hostages.length = 0;
   for (const z of rescueZones) { z.label.remove(); if (!z.disc.isDisposed()) z.disc.dispose(); }
   rescueZones.length = 0;
-  hostagesTotal = 0; hostagesSaved = 0;
+  hostagesTotal = 0; hostagesSaved = 0; hostagesLost = 0;
   if (rescueResetTimer !== null) { clearTimeout(rescueResetTimer); rescueResetTimer = null; }
+  hideRoundResult();
   rescueHud();
   hostagePrompt.style.opacity = '0';
 }
 function resetRescueRound() {
+  const r = rescueRound; // номер уже инкрементирован в таймере checkRoundOver — сохраняем
   disposeRescue();
   setupRescue();
-  netToast('🔄 Новая смена заложников');
+  rescueRound = r;
+  rescueHud();
+  netToast('🔄 Раунд ' + rescueRound);
 }
 // зоны эвакуации статичны и одинаковы на всех клиентах — создаём и у хоста, и у гостя
 function setupRescueZones() {
@@ -1345,6 +1396,7 @@ function setupRescueZones() {
   mkZone(new B.Vector3(18, 0, 9), 12, 'Эвакуация: фургон');
 }
 function setupRescue() {
+  rescueRound = 1; // свежая карта — с первого раунда (resetRescueRound потом восстановит номер)
   // заложники в комнате второго этажа
   addHostage(new B.Vector3(-9.5, 3.84, 78));
   addHostage(new B.Vector3(-6.5, 3.84, 74));
@@ -2186,4 +2238,4 @@ engine.runRenderLoop(() => scene.render());
 window.addEventListener('resize', () => engine.resize());
 
 // отладка
-(window as any).GAME = { engine, scene, camera, targets, pickups, weapons, fire, switchWeapon, getCur: () => cur, held, footprints, w2m, drawMinimap, MM, MMHALF, MM_SPAN, loadMap, mapDefs, getMap: () => curMap, getMmCenterX: () => mmCenterX, getMmCenterZ: () => mmCenterZ, getMmSpan: () => mmSpan, getBspBounds: () => lastBspMinimap && lastBspMinimap.bounds, mmCanvas, netState: () => ({ connected: !!net, ready: net ? net.readyState : -1, id: netId, remotes: [...remotes.keys()], tgts: [...remotes.values()].map((r) => [r.tgt.x, r.tgt.y, r.tgt.z]) }), rescueState: () => ({ diff: DIFFS[diffIdx].name, saved: hostagesSaved, total: hostagesTotal, hostages: hostages.map((h) => ({ st: h.state, pos: [h.rig.root.position.x, h.rig.root.position.y, h.rig.root.position.z].map((v) => +v.toFixed(1)), leader: h.leader === 'player' ? 'player' : h.leader ? 'bot' + h.leader.id : null })), bots: bots.map((b) => ({ id: b.id, team: b.team, task: b.task, hp: b.hp, alive: b.alive, path: b.path.slice(), pos: [b.rig.root.position.x, b.rig.root.position.y, b.rig.root.position.z].map((v) => +v.toFixed(1)) })) }), addBot, playerTakeHostage };
+(window as any).GAME = { engine, scene, camera, targets, pickups, weapons, fire, switchWeapon, getCur: () => cur, held, footprints, w2m, drawMinimap, MM, MMHALF, MM_SPAN, loadMap, mapDefs, getMap: () => curMap, getMmCenterX: () => mmCenterX, getMmCenterZ: () => mmCenterZ, getMmSpan: () => mmSpan, getBspBounds: () => lastBspMinimap && lastBspMinimap.bounds, mmCanvas, netState: () => ({ connected: !!net, ready: net ? net.readyState : -1, id: netId, remotes: [...remotes.keys()], tgts: [...remotes.values()].map((r) => [r.tgt.x, r.tgt.y, r.tgt.z]) }), rescueState: () => ({ diff: DIFFS[diffIdx].name, saved: hostagesSaved, total: hostagesTotal, lost: hostagesLost, round: rescueRound, hostages: hostages.map((h) => ({ st: h.state, pos: [h.rig.root.position.x, h.rig.root.position.y, h.rig.root.position.z].map((v) => +v.toFixed(1)), leader: h.leader === 'player' ? 'player' : h.leader ? 'bot' + h.leader.id : null })), bots: bots.map((b) => ({ id: b.id, team: b.team, task: b.task, hp: b.hp, alive: b.alive, path: b.path.slice(), pos: [b.rig.root.position.x, b.rig.root.position.y, b.rig.root.position.z].map((v) => +v.toFixed(1)) })) }), addBot, playerTakeHostage };
