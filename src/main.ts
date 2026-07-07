@@ -196,13 +196,15 @@ function netOpen() {
     } else if (m.t === 'chat') {
       addChatLine(m.name, m.text);
     } else if (m.t === 'botshoot') {
-      // кооп-хост: гость выстрелил в бота — применяем урон авторитарно
+      // кооп-хост: гость выстрелил в бота — применяем урон авторитарно + будим соседних террористов
       if (pveHostId === netId && !pveGuest) {
         const bot = bots.find((b) => b.id === m.target);
         if (bot && bot.alive && bot.team === 'T' && Number.isFinite(m.dmg)) {
           damageBot(bot, Math.min(200, m.dmg), false);
           bot.lastSeen = performance.now(); bot.aimMs = DIFFS[diffIdx].react * 0.6;
         }
+        const g = m.who ? remotes.get(m.who) : null; // стрельба гостя слышна террористам рядом с ним
+        if (g) for (const t of bots) { if (t.team === 'T' && t.alive && B.Vector3.Distance(t.rig.root.position, g.rig.root.position) < 28) t.lastSeen = performance.now(); }
       }
     } else if (m.t === 'takehostage') {
       // кооп-хост: гость (m.who) хочет забрать заложника — берём ближайшего ждущего к нему
