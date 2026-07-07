@@ -1356,6 +1356,17 @@ function playerTakeHostage(): boolean {
   }
   return false;
 }
+// действие «E»: листать/открыть монитор видеонаблюдения или забрать заложника (общее для клавиши и тач-кнопки)
+function interactE() {
+  if (monitorActive) {
+    if (cctvRigs.length) { monitorIdx = (monitorIdx + 1) % cctvRigs.length; scene.activeCamera = cctvRigs[monitorIdx].cam; showMonitorHud(); syncMonitorScreen(); }
+  } else if (monitorTriggerPos && cctvRigs.length && B.Vector3.Distance(camera.position, monitorTriggerPos) < 3.2) {
+    monitorActive = true; monitorIdx = 0; scene.activeCamera = cctvRigs[0].cam;
+    showMonitorPrompt(false); showMonitorHud(); syncMonitorScreen();
+  } else if (pveGuest) {
+    if (net && net.readyState === WebSocket.OPEN) net.send(JSON.stringify({ t: 'takehostage' })); // кооп-гость: решает хост
+  } else playerTakeHostage();
+}
 function disposeRescue() {
   for (const b of bots) { disposeHumanoid(b.rig); b.label.remove(); }
   bots.length = 0;
@@ -1724,18 +1735,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'KeyP') showPos();   // отладка: показать координаты на экране
   if (e.code === 'KeyN') netConnect(); // сетевая игра: подключиться/отключиться
   if (e.code === 'Tab' && !scoreboardVisible) toggleScoreboard(true); // Tab (зажать) — таблица результатов
-  if (e.code === 'KeyE') {
-    if (monitorActive) {
-      // в мониторе E листает камеры по кругу
-      if (cctvRigs.length) { monitorIdx = (monitorIdx + 1) % cctvRigs.length; scene.activeCamera = cctvRigs[monitorIdx].cam; showMonitorHud(); syncMonitorScreen(); }
-    } else if (monitorTriggerPos && cctvRigs.length && B.Vector3.Distance(camera.position, monitorTriggerPos) < 3.2) {
-      monitorActive = true; monitorIdx = 0; scene.activeCamera = cctvRigs[0].cam;
-      showMonitorPrompt(false); showMonitorHud(); syncMonitorScreen();
-    } else if (pveGuest) {
-      // кооп-гость: заявку на подбор заложника решает хост
-      if (net && net.readyState === WebSocket.OPEN) net.send(JSON.stringify({ t: 'takehostage' }));
-    } else playerTakeHostage(); // рядом с ждущим заложником — берём с собой
-  }
+  if (e.code === 'KeyE') interactE();
   if (e.code === 'KeyB' && hostagesTotal > 0) {
     // подкрепление: B — боец-КТ (у фургона), Shift+B — террорист (в ангаре)
     if (e.shiftKey) {
@@ -1809,6 +1809,8 @@ if (isTouch) {
   const fireBtn = btn('ОГОНЬ', '20px', '24px'); fireBtn.textContent = '🔫';
   const jumpBtn = btn('', '96px', '24px'); jumpBtn.textContent = '⤒';
   const swBtn = btn('', '20px', '100px'); swBtn.textContent = '1/2';
+  const useBtn = btn('', '96px', '100px'); useBtn.textContent = 'E'; useBtn.title = 'взять заложника / монитор';
+  const reloadBtn = btn('', '172px', '24px'); reloadBtn.textContent = '⟳'; reloadBtn.title = 'перезарядка';
 
   let moveId = -1, moveCX = 0, moveCY = 0, lookId = -1, lookX = 0, lookY = 0;
   const MAXR = 50;
@@ -1848,6 +1850,8 @@ if (isTouch) {
   fireBtn.addEventListener('pointerup', () => { mouseDown = false; });
   jumpBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); jumpQueued = true; });
   swBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); switchWeapon(wi === 0 ? 1 : 0); });
+  useBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); start(); interactE(); });
+  reloadBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); reload(); });
 }
 
 // --- вертикаль (гравитация + прыжок) ---
