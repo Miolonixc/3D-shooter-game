@@ -90,8 +90,11 @@ ws.attach(server, '/ws', (conn) => {
 
     // кооп: хост вещает мир (боты+заложники) — просто раздаём остальным. Только от хоста.
     if (m.t === 'pve' && id === pveHostId) { broadcast(m, id); return; }
-    // кооп: гость выстрелил в бота — маршрутизируем хосту (у него авторитарные боты)
-    if (m.t === 'botshoot' && id && id !== pveHostId) { const h = players.get(pveHostId); if (h) sendTo(h.conn, m); return; }
+    // кооп: гость выстрелил в бота / хочет забрать заложника — маршрутизируем хосту.
+    // (хосту добавляем who=id гостя, чтобы он знал, за кем должен идти заложник)
+    if ((m.t === 'botshoot' || m.t === 'takehostage') && id && id !== pveHostId) {
+      const h = players.get(pveHostId); if (h) sendTo(h.conn, { ...m, who: id }); return;
+    }
 
     if (m.t === 'state' && id) {
       const p = players.get(id);

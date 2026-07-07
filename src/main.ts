@@ -204,6 +204,16 @@ function netOpen() {
           bot.lastSeen = performance.now(); bot.aimMs = DIFFS[diffIdx].react * 0.6;
         }
       }
+    } else if (m.t === 'takehostage') {
+      // кооп-хост: гость (m.who) хочет забрать заложника — берём ближайшего ждущего к нему
+      if (pveHostId === netId && !pveGuest && m.who) {
+        const g = remotes.get(m.who);
+        if (g) for (const h of hostages) {
+          if (h.state === 'wait' && B.Vector3.Distance(g.rig.root.position, h.rig.root.position) < 3.0) {
+            h.state = 'follow'; h.leader = null; h.leaderGuestId = m.who; break;
+          }
+        }
+      }
     }
   };
   // тоннель (Cloudflare quick tunnel) периодически рвёт соединение сам по себе (QUIC keepalive) —
@@ -897,6 +907,7 @@ interface Bot {
 interface Hostage {
   rig: Humanoid; state: 'wait' | 'follow' | 'saved';
   leader: 'player' | Bot | null;
+  leaderGuestId?: string;         // кооп: ведёт удалённый игрок (гость) с этим netId — у хоста
   phase: number; label: HTMLDivElement;
   net?: { x: number; y: number; z: number; yaw: number }; // цель интерполяции у гостя
 }
@@ -1167,12 +1178,15 @@ function updateHostages(dt: number) {
       swingLimbs(h.rig, 0);
       if (alive && B.Vector3.Distance(camera.position, root.position) < 2.4) nearWaiting = true;
     } else if (h.state === 'follow') {
-      const leadPos = h.leader === 'player' ? camera.position : h.leader ? h.leader.rig.root.position : root.position;
+      // за кем идём: свой игрок / КТ-бот / удалённый игрок-гость (кооп)
+      const guest = h.leaderGuestId ? remotes.get(h.leaderGuestId) : null;
+      if (h.leaderGuestId && !guest) { h.leaderGuestId = undefined; h.state = 'wait'; continue; } // гость ушёл — заложник ждёт
+      const leadPos = guest ? guest.rig.root.position : h.leader === 'player' ? camera.position : h.leader ? h.leader.rig.root.position : root.position;
       const dist = Math.hypot(leadPos.x - root.position.x, leadPos.z - root.position.z);
       if (dist > 1.7) {
         if (!moveActor(h.rig, leadPos, 3.4, dt)) { h.phase += 3.4 * dt / 1000 * 3.2; swingLimbs(h.rig, h.phase); }
       } else swingLimbs(h.rig, 0);
-      if (h.leader === 'player' && dist > 26) { h.leader = null; h.state = 'wait'; netToast('🧍 Заложник отстал и ждёт'); }
+      if ((h.leader === 'player' || guest) && dist > 26) { h.leader = null; h.leaderGuestId = undefined; h.state = 'wait'; netToast('🧍 Заложник отстал и ждёт'); }
       // дошёл до зоны эвакуации?
       for (const z of rescueZones) {
         if (B.Vector3.Distance(root.position, z.pos) < 2.6) {
@@ -1249,6 +1263,7 @@ function interpolatePve(dt: number) {
     const sp = Math.hypot(root.position.x - before.x, root.position.z - before.z);
     if (sp > 0.003) { b.phase += sp * 3.5; swingLimbs(b.rig, b.phase); } else swingLimbs(b.rig, 0);
   }
+  let nearWaiting = false;
   for (const h of hostages) {
     if (h.state === 'saved' || !h.net) continue;
     const root = h.rig.root;
@@ -1258,7 +1273,9 @@ function interpolatePve(dt: number) {
     root.rotation.y += dy * k;
     const sp = Math.hypot(root.position.x - before.x, root.position.z - before.z);
     if (sp > 0.003) { h.phase += sp * 3.5; swingLimbs(h.rig, h.phase); } else swingLimbs(h.rig, 0);
+    if (h.state === 'wait' && alive && B.Vector3.Distance(camera.position, root.position) < 2.4) nearWaiting = true; // подсказка E у гостя
   }
+  hostagePrompt.style.opacity = nearWaiting ? '1' : '0';
   projectRescueLabels();
 }
 // смена роли host↔guest при изменении хоста/подключения
@@ -1649,6 +1666,9 @@ window.addEventListener('keydown', (e) => {
     } else if (monitorTriggerPos && cctvRigs.length && B.Vector3.Distance(camera.position, monitorTriggerPos) < 3.2) {
       monitorActive = true; monitorIdx = 0; scene.activeCamera = cctvRigs[0].cam;
       showMonitorPrompt(false); showMonitorHud(); syncMonitorScreen();
+    } else if (pveGuest) {
+      // кооп-гость: заявку на подбор заложника решает хост
+      if (net && net.readyState === WebSocket.OPEN) net.send(JSON.stringify({ t: 'takehostage' }));
     } else playerTakeHostage(); // рядом с ждущим заложником — берём с собой
   }
   if (e.code === 'KeyB' && hostagesTotal > 0) {
