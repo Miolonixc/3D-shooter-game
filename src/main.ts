@@ -810,7 +810,7 @@ const NAV_P = [
   new B.Vector3(2, 2.2, 75),     // 2 середина пандуса
   new B.Vector3(8, 0.96, 75),    // 3 коридор (запад пандуса)
   new B.Vector3(10, 0.96, 79),   // 4 конец коридора — ворота у моста (зона)
-  new B.Vector3(8, 0.96, 54),    // 5 юг коридора
+  new B.Vector3(7, 0, 66),       // 5 северный край ангара — ступень (пол 0) вверх на наклонный коридор (z68, пол 1.0); старый (8,54) был за стеной z56
   new B.Vector3(0, 0, 61),       // 6 центр ангара
   new B.Vector3(8, 0, 49),       // 7 ворота ангара
   new B.Vector3(8, 0, 30),       // 8 улица (середина)
@@ -1194,10 +1194,16 @@ function updateBots(dt: number) {
         const target = hostages.find((h) => h.state === 'wait');
         if (!target) { bot.task = 'idle'; bot.path = []; continue; }
         if (walkPath(bot, dt)) {
-          if (moveActor(bot.rig, target.rig.root.position, d.speed, dt)) {
+          // порог подбора 1.9 (а не 0.5 из moveActor): коллайдеры бота и заложника упираются
+          // друг в друга на ~1.2-1.3 — вплотную не подойти
+          const dd = B.Vector3.Distance(bot.rig.root.position, target.rig.root.position);
+          if (dd < 1.9 || moveActor(bot.rig, target.rig.root.position, d.speed, dt)) {
             target.leader = bot; target.state = 'follow';
             bot.escortee = target;
-            bot.zoneIdx = hostagesSaved % rescueZones.length; // чередуем: мост / фургон
+            // КТ всегда ведёт к мосту: путь комната→пандус→коридор→мост — сплошные пологие
+            // уклоны (проверено коллайдер-репликой). Путь к фургону — через ступень ангара
+            // z66→z68 и ящики, где коллайдер-бот застревает. Игрок волен вести в любую зону.
+            bot.zoneIdx = 0;
             bot.task = 'toZone';
             setBotRoute(bot, rescueZones[bot.zoneIdx].node);
             netToast('🛡 Боец ведёт заложника');
@@ -1743,7 +1749,9 @@ window.addEventListener('keydown', (e) => {
       else { addBot('T', new B.Vector3(0, 0, 61)); netToast('☠ Террорист прибыл в ангар'); }
     } else {
       if (bots.filter((b) => b.team === 'CT').length >= 4) netToast('Бойцов уже максимум (4)');
-      else { const b2 = addBot('CT', new B.Vector3(18, 0, 9)); b2.task = 'toHostage'; setBotRoute(b2, 0); netToast('🛡 Боец-КТ выдвинулся от фургона'); }
+      // спавн у моста (node 4): оттуда к комнате ведёт пологий пандус (3→2→1→0). Из ангара не
+      // подняться — там ступень z66→z68, которую коллайдер-бот не берёт (только пандусы).
+      else { const b2 = addBot('CT', new B.Vector3(10, 0.96, 79)); b2.task = 'toHostage'; setBotRoute(b2, 0); netToast('🛡 Боец-КТ прибыл к мосту'); }
     }
   }
   if (e.code === 'KeyH' && hostagesTotal > 0) {
